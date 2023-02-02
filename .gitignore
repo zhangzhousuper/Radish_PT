@@ -1,0 +1,13 @@
+.vscode/
+
+.xmake/
+
+.cache/
+
+.lh/
+
+bin/
+
+build/
+
+compile_commands.json
