@@ -1,26 +1,28 @@
 #pragma once
 
-#include <vector>
-#include <sstream>
+#include "glm/glm.hpp"
+#include "material.h"
+#include "sceneStructs.h"
+#include "utilities.h"
 #include <fstream>
 #include <iostream>
-#include "glm/glm.hpp"
-#include "utilities.h"
-#include "sceneStructs.h"
+#include <sstream>
+#include <vector>
 
 using namespace std;
 
 class Scene {
 private:
-    ifstream fp_in;
-    int loadMaterial(string materialid);
-    int loadGeom(string objectid);
-    int loadCamera();
-public:
-    Scene(string filename);
-    ~Scene();
+  ifstream fp_in;
+  int loadMaterial(string materialid);
+  int loadGeom(string objectid);
+  int loadCamera();
 
-    std::vector<Geom> geoms;
-    std::vector<Material> materials;
-    RenderState state;
+public:
+  Scene(string filename);
+  ~Scene();
+
+  std::vector<Geom> geoms;
+  std::vector<Material> materials;
+  RenderState state;
 };

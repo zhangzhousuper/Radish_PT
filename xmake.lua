@@ -22,7 +22,7 @@ if is_host("windows") then
     add_cxflags("/execution-charset:utf-8", "/source-charset:utf-8", {tools = "cl"})
 end
 
-add_requires("glew", "glm", "stb","tinygltf","tinyobjloader")
+add_requires("glew", "glfw","glm", "stb")
 add_requires("imgui", {configs = {glfw_opengl3 = true}})
 
 -- dynamic link
@@ -32,11 +32,10 @@ target("cuda_pt")
     set_kind("binary")
     add_files("src/*.cpp")
     add_files("src/*.cu")
+    -- add_includedirs("external/include")
     
-    add_headerfiles("src/*.hpp")
-    add_headerfiles("src/*.h")
 
-    add_packages("glew", "glm", "stb", "imgui","tinygltf","tinyobjloader")
+    add_packages("glew", "glfw","glm", "stb", "imgui")
 
     set_rundir("$(projectdir)")
     set_runargs("scenes/cornell.txt")

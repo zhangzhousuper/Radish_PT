@@ -149,7 +149,8 @@ void runCuda() {
     cudaGLUnmapBufferObject(pbo);
   } else {
     saveImage();
-    pathtraceFree() cudaDeviceReset(;);
+    pathtraceFree();
+    cudaDeviceReset();
     exit(EXIT_SUCCESS);
   }
 }
