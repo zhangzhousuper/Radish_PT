@@ -14,7 +14,7 @@ using namespace std;
 class Scene {
 private:
   ifstream fp_in;
-  int loadMaterial(string materialid);
+  int loadMaterial(string materialId);
   int loadGeom(string objectid);
   int loadCamera();
 

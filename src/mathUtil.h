@@ -26,6 +26,14 @@ __host__ __device__ inline float pow5(float x) {
 
 __host__ __device__ inline float square(float x) { return x * x; }
 
+template <typename T> __host__ __device__ inline T calcFilmic(T c) {
+  return (c * (c * 0.22f + 0.03f) + 0.002f) / (c * (c * 0.22f + 0.3f) + 0.06f) -
+         1.f / 30.f;
+}
+__host__ __device__ inline glm::vec3 filmic(glm::vec3 c) {
+  return calcFilmic(c * 1.6f) / calcFilmic(11.2f);
+}
+
 __host__ __device__ inline float satDot(glm::vec3 a, glm::vec3 b) {
   return glm::max(glm::dot(a, b), 0.f);
 }
@@ -71,11 +79,11 @@ __device__ static glm::vec3 cosineSampleHemisphere(glm::vec3 n, float rx,
 
 __device__ static bool refract(glm::vec3 n, glm::vec3 wi, float ior,
                                glm::vec3 &wt) {
-  float conIn = glm::min(glm::dot(n, wi), 1.f);
+  float conIn = glm::dot(n, wi);
   if (conIn < 0.f) {
     ior = 1.f / ior;
   }
-  float sin2In = 1.f - conIn * conIn;
+  float sin2In = glm::max(0.f, 1.f - conIn * conIn);
   float sin2Tr = sin2In / (ior * ior);
 
   if (sin2Tr >= 1.f) {
@@ -88,5 +96,27 @@ __device__ static bool refract(glm::vec3 n, glm::vec3 wi, float ior,
   }
   wt = glm::normalize(-wi / ior + n * (conIn / ior - cosTr));
   return true;
+}
+
+__device__ inline float areaPdfToSolidAngle(float pdf, glm::vec3 ref,
+                                            glm::vec3 y, glm::vec3 ny) {
+  glm::vec3 yToRef = ref - y;
+  float dist2 = glm::dot(yToRef, yToRef);
+
+  return pdf * absDot(ny, glm::normalize(yToRef)) / dist2;
+}
+/**
+ * Handy-dandy hash function that
+ * provides seeds for random number
+ * generation.
+ */
+__host__ __device__ inline unsigned int utilhash(unsigned int a) {
+  a = (a + 0x7ed55d16) + (a << 12);
+  a = (a ^ 0xc761c23c) ^ (a >> 19);
+  a = (a + 0x165667b1) + (a << 5);
+  a = (a + 0xd3a2646c) ^ (a << 9);
+  a = (a + 0xfd7046c5) + (a << 3);
+  a = (a ^ 0xb55a4f09) ^ (a >> 16);
+  return a;
 }
 } // namespace Math
