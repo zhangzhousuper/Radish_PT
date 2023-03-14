@@ -43,6 +43,7 @@ int main(int argc, char **argv) {
 
   // Load scene file
   scene = new Scene(sceneFile);
+  exit(0);
 
   // Create Instance for ImGUIData
   guiData = new GuiDataContainer();
@@ -80,19 +81,22 @@ int main(int argc, char **argv) {
   // GLFW main loop
   mainLoop();
 
+  Resource::clear();
+
   return 0;
 }
 
 void saveImage() {
   float samples = iteration;
   // output image file
-  image img(width, height);
+  Image img(width, height);
 
   for (int x = 0; x < width; x++) {
     for (int y = 0; y < height; y++) {
       int index = x + (y * width);
-      glm::vec3 pix = renderState->image[index];
-      img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+      glm::vec3 pix = renderState->image[index] / samples;
+      pix = Math::gammaCorrection(Math::ACES(pix));
+      img.setPixel(width - 1 - x, y, pix);
     }
   }
 
@@ -132,8 +136,8 @@ void runCuda() {
   // this buffer
 
   if (iteration == 0) {
-    pathtraceFree();
-    pathtraceInit(scene);
+    pathTraceFree();
+    pathTraceInit(scene);
   }
 
   if (iteration < renderState->iterations) {
@@ -143,13 +147,13 @@ void runCuda() {
 
     // execute the kernel
     int frame = 0;
-    pathtrace(pbo_dptr, frame, iteration);
+    pathTrace(pbo_dptr, frame, iteration);
 
     // unmap buffer object
     cudaGLUnmapBufferObject(pbo);
   } else {
     saveImage();
-    pathtraceFree();
+    pathTraceFree();
     cudaDeviceReset();
     exit(EXIT_SUCCESS);
   }

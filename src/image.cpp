@@ -1,45 +1,62 @@
 #include <iostream>
-#include <string>
 #include <stb_image_write.h>
+#include <std_image.h>
+#include <stdexcept>
+#include <string>
 
 #include "image.h"
 
-image::image(int x, int y) :
-        xSize(x),
-        ySize(y),
-        pixels(new glm::vec3[x * y]) {
+Image::Image(const std::string &filename) {
+  int channels;
+  float *data = stbi_loadf(filename.c_str(), &mWidth, &mHeight, &channels, 3);
+
+  if (!data) {
+    throw std::runtime_error("Failed to load image " + filename);
+  }
+
+  mPixels = new glm::vec3[mWidth * mHeight];
+  memcpy(mPixels, data, mWidth * mHeight * sizeof(glm::vec3));
+
+  if (data) {
+    stbi_image_free(data);
+  }
 }
 
-image::~image() {
-    delete pixels;
+Image::~Image() {
+  if (mPixels) {
+    delete[] mPixels;
+  }
 }
 
-void image::setPixel(int x, int y, const glm::vec3 &pixel) {
-    assert(x >= 0 && y >= 0 && x < xSize && y < ySize);
-    pixels[(y * xSize) + x] = pixel;
+void Image::setPixel(int x, int y, const glm::vec3 &pixel) {
+  assert(expression : x >= 0 && x < mWidth && y >= 0 && y < mHeight);
+  mPixels[y * mWidth + x] = pixel;
 }
 
-void image::savePNG(const std::string &baseFilename) {
-    unsigned char *bytes = new unsigned char[3 * xSize * ySize];
-    for (int y = 0; y < ySize; y++) {
-        for (int x = 0; x < xSize; x++) { 
-            int i = y * xSize + x;
-            glm::vec3 pix = glm::clamp(pixels[i], glm::vec3(), glm::vec3(1)) * 255.f;
-            bytes[3 * i + 0] = (unsigned char) pix.x;
-            bytes[3 * i + 1] = (unsigned char) pix.y;
-            bytes[3 * i + 2] = (unsigned char) pix.z;
-        }
+void Image::savePNG(const std::string &baseFilename) {
+  unsigned char *bytes = new unsigned char[mWidth * mHeight * 3];
+  for (int y = 0; y < mHeight; y++) {
+    for (int x = 0; x < mWidth; x++) {
+      int idx = y * mWidth + x;
+      glm::vec3 pixel =
+          glm::clamp(mPixels[idx], glm::vec3(0.0f), glm::vec3(1.0f)) * 255.0f;
+      bytes[idx * 3 + 0] = (unsigned char)pixel.r;
+      bytes[idx * 3 + 1] = (unsigned char)pixel.g;
+      bytes[idx * 3 + 2] = (unsigned char)pixel.b;
     }
+  }
 
-    std::string filename = baseFilename + ".png";
-    stbi_write_png(filename.c_str(), xSize, ySize, 3, bytes, xSize * 3);
-    std::cout << "Saved " << filename << "." << std::endl;
+  std::string filename = baseFilename + ".png";
+  stbi_write_png(filename.c_str(), mWidth, mHeight, 3, bytes, mWidth * 3);
 
-    delete[] bytes;
+  std::cout << "Saved image " << filename << std::endl;
+
+  delete[] bytes;
 }
 
-void image::saveHDR(const std::string &baseFilename) {
-    std::string filename = baseFilename + ".hdr";
-    stbi_write_hdr(filename.c_str(), xSize, ySize, 3, (const float *) pixels);
-    std::cout << "Saved " + filename + "." << std::endl;
+void Image::saveHDR(const std::string &baseFilename) {
+  std::string filename = baseFilename + ".hdr";
+  stbi_write_hdr(filename.c_str(), mWidth, mHeight, 3, (float *)mPixels);
+
+  std::cout << "Saved image " << filename << std::endl;
 }

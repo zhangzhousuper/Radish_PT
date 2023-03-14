@@ -4,19 +4,109 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <iostream>
+#include <iterator>
 #include <map>
+#include <string>
 
-std::map<std::string, int> MaterialMap = {
+std::map<std::string, int> MaterialTypeTokenMap = {
     {"Lambertian", Material::Type::Lambertian},
     {"Metallic", Material::Type::Metallic},
     {"Dielectric", Material::Type::Dielectric},
     {"Light", Material::Type::Light},
 };
 
-Scene::Scene(string filename) {
+std::map<std::string, Model *> Resource::modelPool;
+std::map<std::string, Image *> Resource::texturePool;
+
+Model *Resource::loadModel(const std::string &filename) {
+  auto find = modelPool.find(filename);
+  if (find != modelPool.end()) {
+    return find->second;
+  }
+
+  auto model = new Model();
+
+  tinyobj::attrib_t attrib;
+  std::vector<tinyobj::shape_t> shapes;
+  std::string warn;
+  std::string err;
+
+  std::cout << "Loading model " << filename << "..." << std::endl;
+
+  if (!tinyobj::LoadObj(&attrib, &shapes, nullptr, &warn, &err,
+                        filename.c_str())) {
+    std::cerr << err << std::endl;
+    return nullptr;
+  }
+  bool hasTexcoord = !attrib.texcoords.empty();
+
+#if INDEXED_MESH_DATA
+  model->vertices.resize(attrib.vertices.size() / 3);
+  model->normals.resize(attrib.normals.size() / 3);
+  memcpy(model->vertices.data(), attrib.vertices.data(),
+         attrib.vertices.size() * sizeof(float));
+  memcpy(model->normals.data(), attrib.normals.data(),
+         attrib.normals.size() * sizeof(float));
+  if (hasTexcoord) {
+    model->texcoords.resize(attrib.texcoords.size() / 2);
+    memcpy(model->texcoords.data(), attrib.texcoords.data(),
+           attrib.texcoords.size() * sizeof(float));
+  } else {
+    model->texcoords.resize(attrib.vertices.size() / 3);
+    for (const auto &shape : shapes) {
+      for (const auto &index : shape.mesh.indices) {
+        model->indices.push_back(glm::ivec3(
+            index.vertex_index, index.normal_index,
+            hasTexcoord ? index.texcoord_index : index.vertex_index));
+      }
+    }
+  }
+#else
+  for (const auto &shape : shapes) {
+    for (const auto &index : shape.mesh.indices) {
+      model->vertices.push_back(
+          *((glm::vec3 *)attrib.vertices.data() + index.vertex_index));
+      model->normals.push_back(
+          *((glm::vec3 *)attrib.normals.data() + index.normal_index));
+
+      model->texcoords.push_back(
+          hasTexcoord
+              ? *((glm::vec2 *)attrib.texcoords.data() + index.texcoord_index)
+              : glm::vec2(0.0f));
+    }
+  }
+
+#endif
+  modelPool[filename] = model;
+  return model;
+}
+
+Image *Resource::loadTexture(const std::string &filename) {
+  auto find = texturePool.find(filename);
+  if (find != texturePool.end()) {
+    return find->second;
+  }
+
+  auto image = new Image(filename);
+  texturePool[filename] = image;
+  return image;
+}
+
+void Resource::clear() {
+  for (auto &pair : modelPool) {
+    delete pair.second;
+  }
+  for (auto &pair : texturePool) {
+    delete pair.second;
+  }
+  texturePool.clear();
+}
+
+Scene::Scene(const std::string &filename) {
   std::cout << "Reading scene from " << filename << " ..." << std::endl;
   std::cout << " " << std::endl;
   char *fname = (char *)filename.c_str();
+
   fp_in.open(fname);
   if (!fp_in.is_open()) {
     cout << "Error reading from file - aborting!" << endl;
@@ -31,7 +121,7 @@ Scene::Scene(string filename) {
         loadMaterial(tokens[1]);
         cout << " " << endl;
       } else if (tokens[0] == "OBJECT") {
-        loadGeom(tokens[1]);
+        loadModel(tokens[1]);
         cout << " " << endl;
       } else if (tokens[0] == "CAMERA") {
         loadCamera();
@@ -41,71 +131,67 @@ Scene::Scene(string filename) {
   }
 }
 
-int Scene::loadGeom(string objectid) {
-  int id = atoi(objectid.c_str());
-  if (id != geoms.size()) {
-    cout << "ERROR: OBJECT ID does not match expected number of geoms" << endl;
-    return -1;
-  } else {
-    cout << "Loading Geom " << id << "..." << endl;
-    Geom newGeom;
-    string line;
+Scene::~Scene() {}
 
-    // load object type
-    utilityCore::safeGetline(fp_in, line);
-    if (!line.empty() && fp_in.good()) {
-      if (line == "sphere") {
-        cout << "Creating new sphere..." << endl;
-        newGeom.type = GeomType::SPHERE;
-      } else if (line == "cube") {
-        cout << "Creating new cube..." << endl;
-        newGeom.type = GeomType::CUBE;
-      }
+void Scene::loadModel(const std::string &objId) {
+  cout << "Loading Model ..." << endl;
+  ModelInstance instance;
+
+  std::string line;
+  utilityCore::safeGetline(fp_in, line);
+
+  std::string filename = line;
+  std::cout << "filename: " << filename << std::endl;
+  instance.meshData = Resource::loadModel(filename);
+
+  // link material
+  utilityCore::safeGetline(fp_in, line);
+  if (!line.empty() && fp_in.good()) {
+    std::vector<std::string> tokens = utilityCore::tokenizeString(line);
+    if (materialMap.find(tokens[1]) == materialMap.end()) {
+      std::cerr << "Material " << tokens[1] << " not found!" << std::endl;
+      throw;
     }
-
-    // link material
-    utilityCore::safeGetline(fp_in, line);
-    if (!line.empty() && fp_in.good()) {
-      vector<string> tokens = utilityCore::tokenizeString(line);
-      newGeom.materialid = atoi(tokens[1].c_str());
-      cout << "Connecting Geom " << objectid << " to Material "
-           << newGeom.materialid << "..." << endl;
-    }
-
-    // load transformations
-    utilityCore::safeGetline(fp_in, line);
-    while (!line.empty() && fp_in.good()) {
-      vector<string> tokens = utilityCore::tokenizeString(line);
-
-      // load tranformations
-      if (tokens[0] == "TRANSLATION") {
-        newGeom.translation =
-            glm::vec3(atof(tokens[1].c_str()), atof(tokens[2].c_str()),
-                      atof(tokens[3].c_str()));
-      } else if (tokens[0] == "ROTATION") {
-        newGeom.rotation =
-            glm::vec3(atof(tokens[1].c_str()), atof(tokens[2].c_str()),
-                      atof(tokens[3].c_str()));
-      } else if (tokens[0] == "SCALE") {
-        newGeom.scale =
-            glm::vec3(atof(tokens[1].c_str()), atof(tokens[2].c_str()),
-                      atof(tokens[3].c_str()));
-      }
-
-      utilityCore::safeGetline(fp_in, line);
-    }
-
-    newGeom.transform = Math::buildTransformationMatrix(
-        newGeom.translation, newGeom.rotation, newGeom.scale);
-    newGeom.inverseTransform = glm::inverse(newGeom.transform);
-    newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
-
-    geoms.push_back(newGeom);
-    return 1;
+    instance.materialId = materialMap[tokens[1]];
+    std::cout << "link to material " << tokens[1] << " with id "
+              << instance.materialId << std::endl;
   }
+
+  // load transform
+  utilityCore::safeGetline(fp_in, line);
+  while (!line.empty() && fp_in.good()) {
+    std::vector<std::string> tokens = utilityCore::tokenizeString(line);
+    if (tokens[0] == "TRANSLATE") {
+      instance.transform =
+          glm::translate(instance.transform,
+                         glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
+                                   std::stof(tokens[3])));
+    } else if (tokens[0] == "SCALE") {
+      instance.transform =
+          glm::scale(instance.transform,
+                     glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
+                               std::stof(tokens[3])));
+    } else if (tokens[0] == "ROTATE") {
+      instance.transform =
+          glm::rotate(instance.transform, std::stof(tokens[4]),
+                      glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
+                                std::stof(tokens[3])));
+    } else {
+      break;
+    }
+    utilityCore::safeGetline(fp_in, line);
+  }
+
+  instance.transform = Math::buildTransformationMatrix(
+      instance.translation, instance.rotation, instance.scale);
+  instance.inverseTransform = glm::inverse(instance.transform);
+  instance.normalMatrix = glm::transpose(instance.inverseTransform);
+
+  std::cout << "Complete loading model" << std::endl;
+  modelInstances.push_back(instance);
 }
 
-int Scene::loadCamera() {
+void Scene::loadCamera() {
   cout << "Loading Camera ..." << endl;
   RenderState &state = this->state;
   Camera &camera = state.camera;
@@ -171,43 +257,33 @@ int Scene::loadCamera() {
   std::fill(state.image.begin(), state.image.end(), glm::vec3());
 
   cout << "Loaded camera!" << endl;
-  return 1;
 }
 
-int Scene::loadMaterial(string materialid) {
-  int id = atoi(materialid.c_str());
-  if (id != materials.size()) {
-    cout << "ERROR: MATERIAL ID does not match expected number of materials"
-         << endl;
-    return -1;
-  } else {
-    cout << "Loading Material " << id << "..." << endl;
-    Material newMaterial;
+void Scene::loadMaterial(const std::string &materialId) {
+  std::cout << "Loading Material ..." << std::endl;
+  Material material;
 
-    // load static properties
-    for (int i = 0; i < 6; i++) {
-      string line;
-      utilityCore::safeGetline(fp_in, line);
-      auto tokens = utilityCore::tokenizeString(line);
-      if (tokens[0] == "Type") {
-        newMaterial.type = MaterialMap[tokens[1]];
-      } else if (tokens[0] == "BaseColor") {
-        glm::vec3 baseColor(std::stof(tokens[1]), std::stof(tokens[2]),
-                            std::stof(tokens[3]));
-        newMaterial.baseColor = baseColor;
-      }
-
-      else if (tokens[0] == "Metallic") {
-        newMaterial.metallic = std::stof(tokens[1]);
-      } else if (tokens[0] == "Roughness") {
-        newMaterial.roughness = std::stof(tokens[1]);
-      } else if (tokens[0] == "Ior") {
-        newMaterial.ior = std::stof(tokens[1]);
-      } else if (tokens[0] == "Emittance") {
-        newMaterial.emittance = std::stof(tokens[1]);
-      }
+  for (int i = 0; i < 6; i++) {
+    std::string line;
+    utilityCore::safeGetline(fp_in, line);
+    auto tokens = utilityCore::tokenizeString(line);
+    if (tokens[0] == "Type") {
+      material.type = MaterialTypeTokenMap[tokens[1]];
+    } else if (tokens[0] == "BaseColor") {
+      glm::vec3 baseColor(std::stof(tokens[1]), std::stof(tokens[2]),
+                          std::stof(tokens[3]));
+      material.baseColor = baseColor;
+    } else if (tokens[0] == "Metallic") {
+      material.metallic = std::stof(tokens[1]);
+    } else if (tokens[0] == "Roughness") {
+      material.roughness = std::stof(tokens[1]);
+    } else if (tokens[0] == "Ior") {
+      material.ior = std::stof(tokens[1]);
+    } else if (tokens[0] == "Emittance") {
+      material.emittance = std::stof(tokens[1]);
     }
-    materials.push_back(newMaterial);
-    return 1;
   }
+  materialMap[materialId] = materials.size();
+  materials.push_back(material);
+  std::cout << "Complete loading material" << std::endl;
 }

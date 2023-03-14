@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "bvh.h"
+#include "material.h"
+
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
 enum GeomType {
@@ -22,7 +25,7 @@ struct Ray {
 
 struct Geom {
   GeomType type;
-  int materialid;
+  int materialId;
   glm::vec3 translation;
   glm::vec3 rotation;
   glm::vec3 scale;
@@ -56,6 +59,7 @@ struct RenderState {
 struct PathSegment {
   Ray ray;
   glm::vec3 throughput;
+  glm::vec3 radiance;
   int pixelIndex;
   int remainingBounces;
 };
@@ -63,8 +67,9 @@ struct PathSegment {
 // Use with a corresponding PathSegment to do:
 // 1) color contribution computation
 // 2) BSDF evaluation: generate a new ray
-struct ShadeableIntersection {
+struct Intersection {
   float dist;
+  glm::vec3 position;
   glm::vec3 surfaceNormal;
   glm::vec2 surfaceUV;
   glm::vec3 incomingDir;

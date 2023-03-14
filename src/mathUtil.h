@@ -60,9 +60,9 @@ __device__ static glm::vec2 concentricSampleDisk(float x, float y) {
 }
 
 __device__ static glm::mat3 localRefMatrix(glm::vec3 n) {
-  glm::vec3 t = glm::abs(n.z) > 0.999f ? glm::vec3(0.f, 1.f, 0.f)
-                                       : glm::vec3(0.f, 0.f, 1.f);
-  glm ::vec3 b = glm::cross(n, t);
+  glm::vec3 t = (glm::abs(n.y) > 0.9999f) ? glm::vec3(0.f, 0.f, 1.f)
+                                          : glm::vec3(0.f, 1.f, 0.f);
+  glm::vec3 b = glm::normalize(glm::cross(n, t));
   t = glm::cross(b, n);
   return glm::mat3(t, b, n);
 }

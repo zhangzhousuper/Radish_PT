@@ -6,6 +6,8 @@
 
 .lh/
 
+imgui.ini
+
 bin/
 
 build/

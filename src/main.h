@@ -14,14 +14,15 @@
 #include <stdlib.h>
 #include <string>
 
+#include "sceneStructs.h"
 
 #include "image.h"
-#include "mathUtil.h"
-#include "pathtrace.h"
-#include "scene.h"
-#include "sceneStructs.h"
-#include "utilities.h"
 
+#include "pathtrace.h"
+
+#include "mathUtil.h"
+#include "scene.h"
+#include "utilities.h"
 
 using namespace std;
 

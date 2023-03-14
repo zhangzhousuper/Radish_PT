@@ -50,7 +50,7 @@ FovY        45
 LensRadius	0
 FocalDist	1
 Sample		5000
-Depth		2
+Depth		8
 File        Cornell
 Eye         0.0 5 10.5
 LookAt      0 5 0
