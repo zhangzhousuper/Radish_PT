@@ -1,4 +1,7 @@
 #include "scene.h"
+#include "cuda_runtime_api.h"
+#include "driver_types.h"
+#include "glm/gtx/dual_quaternion.hpp"
 #include "glm/trigonometric.hpp"
 #include <cstring>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -6,7 +9,10 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <stack>
 #include <string>
+#include <vcruntime.h>
+#include <vector>
 
 std::map<std::string, int> MaterialTypeTokenMap = {
     {"Lambertian", Material::Type::Lambertian},
@@ -15,32 +21,31 @@ std::map<std::string, int> MaterialTypeTokenMap = {
     {"Light", Material::Type::Light},
 };
 
-std::map<std::string, Model *> Resource::modelPool;
+std::map<std::string, MeshData *> Resource::meshDataPool;
 std::map<std::string, Image *> Resource::texturePool;
 
-Model *Resource::loadModel(const std::string &filename) {
-  auto find = modelPool.find(filename);
-  if (find != modelPool.end()) {
+MeshData *Resource::loadOBJMesh(const std::string &filename) {
+  auto find = meshDataPool.find(filename);
+  if (find != meshDataPool.end()) {
     return find->second;
   }
 
-  auto model = new Model();
+  auto model = new MeshData;
 
   tinyobj::attrib_t attrib;
   std::vector<tinyobj::shape_t> shapes;
   std::string warn;
   std::string err;
 
-  std::cout << "Loading model " << filename << "..." << std::endl;
-
+  std::cout << "\t\t[Model loading " << filename << " ...]" << std::endl;
   if (!tinyobj::LoadObj(&attrib, &shapes, nullptr, &warn, &err,
                         filename.c_str())) {
-    std::cerr << err << std::endl;
+    std::cout << "\t\t\t[Fail Error msg [" << err << "]" << std::endl;
     return nullptr;
   }
   bool hasTexcoord = !attrib.texcoords.empty();
 
-#if INDEXED_MESH_DATA
+#if MESH_DATA_INDEXED
   model->vertices.resize(attrib.vertices.size() / 3);
   model->normals.resize(attrib.normals.size() / 3);
   memcpy(model->vertices.data(), attrib.vertices.data(),
@@ -77,8 +82,22 @@ Model *Resource::loadModel(const std::string &filename) {
   }
 
 #endif
-  modelPool[filename] = model;
+  std::cout << "\t\t[Vertex count = " << model->vertices.size() << "]"
+            << std::endl;
+  meshDataPool[filename] = model;
   return model;
+}
+
+MeshData *Resource::loadGLTFMesh(const std::string &filename) {
+  return nullptr;
+}
+
+MeshData *Resource::loadModelMeshData(const std::string &filename) {
+  if (filename.find(".obj") != filename.npos) {
+    return loadOBJMesh(filename);
+  } else {
+    return loadGLTFMesh(filename);
+  }
 }
 
 Image *Resource::loadTexture(const std::string &filename) {
@@ -93,9 +112,10 @@ Image *Resource::loadTexture(const std::string &filename) {
 }
 
 void Resource::clear() {
-  for (auto &pair : modelPool) {
+  for (auto &pair : meshDataPool) {
     delete pair.second;
   }
+  meshDataPool.clear();
   for (auto &pair : texturePool) {
     delete pair.second;
   }
@@ -103,7 +123,7 @@ void Resource::clear() {
 }
 
 Scene::Scene(const std::string &filename) {
-  std::cout << "Reading scene from " << filename << " ..." << std::endl;
+  std::cout << "[Reading scene from " << filename << " ]..." << std::endl;
   std::cout << " " << std::endl;
   char *fname = (char *)filename.c_str();
 
@@ -133,6 +153,36 @@ Scene::Scene(const std::string &filename) {
 
 Scene::~Scene() {}
 
+void Scene::buildDevData() {
+#if MESH_DATA_INDEXED
+#else
+  for (const auto &instance : modelInstances) {
+    for (size_t i = 0; i < instance.meshData->vertices.size(); i++) {
+      meshData.vertices.push_back(
+          glm::vec3(instance.transform *
+                    glm::vec4(instance.meshData->vertices[i], 1.0f)));
+      meshData.normals.push_back(glm::normalize(instance.normalMatrix *
+                                                instance.meshData->normals[i]));
+      meshData.texcoords.push_back(instance.meshData->texcoords[i]);
+      if (i % 3 == 0) {
+        materialIds.push_back(instance.materialId);
+      }
+    }
+  }
+#endif
+  BVHSize = BVHBuilder::build(meshData.vertices, boundingBoxes, BVHNodes);
+  checkCUDAError("BVH Build");
+  hstScene.create(*this);
+  cudaMalloc(&devScene, sizeof(DevScene));
+  cudaMemcpyHostToDev(devScene, &hstScene, sizeof(DevScene));
+  checkCUDAError("Dev Scene");
+}
+
+void Scene::clear() {
+  hstScene.destroy();
+  cudaSafeFree(devScene);
+}
+
 void Scene::loadModel(const std::string &objId) {
   cout << "Loading Model ..." << endl;
   ModelInstance instance;
@@ -142,7 +192,7 @@ void Scene::loadModel(const std::string &objId) {
 
   std::string filename = line;
   std::cout << "filename: " << filename << std::endl;
-  instance.meshData = Resource::loadModel(filename);
+  instance.meshData = Resource::loadModelMeshData(filename);
 
   // link material
   utilityCore::safeGetline(fp_in, line);
@@ -161,17 +211,18 @@ void Scene::loadModel(const std::string &objId) {
   utilityCore::safeGetline(fp_in, line);
   while (!line.empty() && fp_in.good()) {
     std::vector<std::string> tokens = utilityCore::tokenizeString(line);
-    if (tokens[0] == "TRANSLATE") {
+    if (tokens[0] == "Translate") {
       instance.transform =
           glm::translate(instance.transform,
                          glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
                                    std::stof(tokens[3])));
-    } else if (tokens[0] == "SCALE") {
+      std::cout << vec3ToString(instance.translation) << "\n";
+    } else if (tokens[0] == "Rotate") {
       instance.transform =
           glm::scale(instance.transform,
                      glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
                                std::stof(tokens[3])));
-    } else if (tokens[0] == "ROTATE") {
+    } else if (tokens[0] == "Scale") {
       instance.transform =
           glm::rotate(instance.transform, std::stof(tokens[4]),
                       glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
@@ -286,4 +337,73 @@ void Scene::loadMaterial(const std::string &materialId) {
   materialMap[materialId] = materials.size();
   materials.push_back(material);
   std::cout << "Complete loading material" << std::endl;
+}
+
+void DevScene::create(Scene &scene) {
+  std::vector<DevTextureObj> textureObjs;
+
+  size_t textureTotalSize = 0;
+  for (auto &texture : scene.textures) {
+    textureTotalSize += texture->byteSize();
+  }
+  cudaMalloc(&dev_textures, textureTotalSize);
+
+  size_t textureOffset = 0;
+  for (auto texture : scene.textures) {
+    cudaMemcpy(dev_textures + textureOffset, texture->data(),
+               texture->byteSize(), cudaMemcpyKind::cudaMemcpyHostToDevice);
+    textureObjs.push_back({texture, dev_textures + textureOffset});
+    textureOffset += texture->byteSize();
+  }
+
+  cudaMalloc(&dev_textureObjs, textureObjs.size() * sizeof(DevTextureObj));
+  cudaMemcpyHostToDev(dev_textureObjs, textureObjs.data(),
+                      textureObjs.size() * sizeof(DevTextureObj));
+  checkCUDAError("DevScene::texture");
+
+  cudaMalloc(&dev_materials, byteSizeOf(scene.materials));
+  cudaMemcpyHostToDev(dev_materials, scene.materials.data(),
+                      byteSizeOf(scene.materials));
+
+  cudaMalloc(&dev_materialIds, byteSizeOf(scene.materials));
+  cudaMemcpyHostToDev(dev_materialIds, scene.materials.data(),
+                      byteSizeOf(scene.materials));
+
+  cudaMalloc(&dev_vertices, byteSizeOf(scene.meshData.vertices));
+  cudaMemcpyHostToDev(dev_vertices, scene.meshData.vertices.data(),
+                      byteSizeOf(scene.meshData.vertices));
+
+  cudaMalloc(&dev_normals, byteSizeOf(scene.meshData.normals));
+  cudaMemcpyHostToDev(dev_normals, scene.meshData.normals.data(),
+                      byteSizeOf(scene.meshData.normals));
+
+  cudaMalloc(&dev_texcoords, byteSizeOf(scene.meshData.texcoords));
+  cudaMemcpyHostToDev(dev_texcoords, scene.meshData.texcoords.data(),
+                      byteSizeOf(scene.meshData.texcoords));
+
+  cudaMalloc(&dev_aabb, byteSizeOf(scene.boundingBoxes));
+  cudaMemcpyHostToDev(dev_aabb, scene.boundingBoxes.data(),
+                      byteSizeOf(scene.boundingBoxes));
+
+  for (int i = 0; i < 6; i++) {
+    cudaMalloc(&dev_bvh[i], byteSizeOf(scene.BVHNodes[i]));
+    cudaMemcpyHostToDev(dev_bvh[i], scene.BVHNodes[i].data(),
+                        byteSizeOf(scene.BVHNodes[i]));
+  }
+  BVHSize = scene.BVHSize;
+  checkCUDAError("DevScene::meshData");
+}
+
+void DevScene::destroy() {
+  cudaFree(dev_textures);
+  cudaFree(dev_textureObjs);
+  cudaFree(dev_materials);
+  cudaFree(dev_materialIds);
+  cudaFree(dev_vertices);
+  cudaFree(dev_normals);
+  cudaFree(dev_texcoords);
+  cudaFree(dev_aabb);
+  for (int i = 0; i < 6; i++) {
+    cudaFree(dev_bvh[i]);
+  }
 }

@@ -13,6 +13,14 @@
 
 struct Material {
   enum Type { Lambertian, Metallic, Dielectric, Disney, Light };
+
+  std::string toString() const {
+    std::stringstream ss;
+    ss << "[Type = " << type << ", BaseColor = " << vec3ToString(baseColor)
+       << "]";
+    return ss.str();
+  }
+
   int type;
   glm::vec3 baseColor;
   struct {
@@ -105,8 +113,6 @@ __device__ static void dielectricSample(glm::vec3 n, glm::vec3 wo,
                                         BSDFSample &sample) {
   float ior = material.ior;
   float pdfReflection = fresnel(glm::dot(n, wo), ior);
-  float pdfTransmission = 1.f - pdfReflection;
-  pdfReflection = 1.f;
 
   sample.bsdf = material.baseColor;
 

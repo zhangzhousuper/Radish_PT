@@ -105,6 +105,7 @@ void cleanupCuda() {
 
 void initCuda() {
   cudaGLSetGLDevice(0);
+  checkCUDAError("cudaGLSetDevice");
 
   // Clean up on program exit
   atexit(cleanupCuda);

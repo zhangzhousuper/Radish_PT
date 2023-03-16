@@ -1,5 +1,10 @@
 #pragma once
 
+#include <vector>
+
+#include <iostream>
+#include <sstream>
+
 #include "glm/ext/vector_float2.hpp"
 #include "glm/fwd.hpp"
 #include <cuda_runtime.h>
@@ -13,6 +18,12 @@
 #define SQRT_OF_ONE_THIRD 0.5773502691896257645091487805019574556476f
 #define EPSILON 0.00001f
 
+static std::string vec3ToString(const glm::vec3 &vec) {
+  std::stringstream ss;
+  ss << "{ x = " << vec.x << ", y = " << vec.y << ", z = " << vec.z << " }";
+  return ss.str();
+}
+
 namespace Math {
 bool epsilonCheck(float a, float b);
 
@@ -22,6 +33,10 @@ glm::mat4 buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation,
 __host__ __device__ inline float pow5(float x) {
   float x2 = x * x;
   return x2 * x2 * x;
+}
+
+template <typename T> bool between(const T &x, const T &min, const T &max) {
+  return x >= min && x <= max;
 }
 
 __host__ __device__ inline float square(float x) { return x * x; }
@@ -105,6 +120,7 @@ __device__ inline float areaPdfToSolidAngle(float pdf, glm::vec3 ref,
 
   return pdf * absDot(ny, glm::normalize(yToRef)) / dist2;
 }
+
 /**
  * Handy-dandy hash function that
  * provides seeds for random number

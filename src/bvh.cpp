@@ -9,6 +9,7 @@
 int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
                       std::vector<AABB> &boundingBoxes,
                       std::vector<std::vector<MTBVHNode>> &BVHNodes) {
+  std::cout << "[BVH building...]" << std::endl;
   int numPrimitives = vertices.size() / 3;
   int BVHSize = numPrimitives * 2 - 1;
 
@@ -28,10 +29,12 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
   int stackTop = 0;
   stack[stackTop++] = {0, 0, numPrimitives - 1};
 
-  const int NumBuckets = 32;
+  const int NumBuckets = 16;
 
   // using non-recursive approach to build BVH directly flatteded
+  int depth = 0;
   while (stackTop) {
+    depth = std::max(depth, stackTop);
     stackTop--;
     int offset = stack[stackTop].offset;
     int start = stack[stackTop].start;
@@ -49,8 +52,8 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
     }
     boundingBoxes[offset] = nodeBound;
 
-    std::cout << nodeBound.toString() << " " << offset << "" << start << " "
-              << end << std::endl;
+    std::cout << std::setw(10) << offset << " " << start << " " << end << " "
+              << nodeBound.toString() << "\n";
 
     if (isLeaf) {
       continue;
@@ -127,6 +130,8 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
     stack[stackTop++] = {offset + 1, start, divPrim};
   }
 
+  std::cout << "\t[Size = " << BVHSize << ", depth = " << depth << "]"
+            << std::endl;
   buildMTBVH(boundingBoxes, nodeInfo, BVHSize, BVHNodes);
   return BVHSize;
 }
@@ -155,7 +160,7 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
       int nodeSize = isLeaf ? 1 : nodeInfo[nodeIdOrig].primIdOrSize;
 
       nodes[nodeIdNew] = {isLeaf ? nodeInfo[nodeIdOrig].primIdOrSize
-                                 : BVHNodeNonLeaf,
+                                 : NullPrimitive,
                           nodeIdOrig, nodeSize + nodeIdNew};
       nodeIdNew++;
 
@@ -181,5 +186,15 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
       stack[stackTop++] = right;
       stack[stackTop++] = left;
     }
+  }
+  for (const auto &nodes : BVHNodes) {
+    for (const auto &node : nodes) {
+      std::cout << std::setw(3) << node.primitiveId << " ";
+    }
+    std::cout << "\n";
+    for (const auto &node : nodes) {
+      std::cout << std::setw(3) << node.nextNodeIfMiss << " ";
+    }
+    std::cout << "\n\n";
   }
 }

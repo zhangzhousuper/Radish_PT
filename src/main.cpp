@@ -31,6 +31,70 @@ int height;
 //-------------MAIN--------------
 //-------------------------------
 
+void testAABB() {
+  AABB boxes[] = {
+      {glm::vec3(-1.f), glm::vec3(1.f)}, {glm::vec3(0.f), glm::vec3(1.f)},
+      {glm::vec3(0.f), glm::vec3(1.f)},  {glm::vec3(0.f), glm::vec3(1.f)},
+      {glm::vec3(0.f), glm::vec3(1.f)},
+  };
+
+  Ray ray[] = {
+      {glm::vec3(-0.1f), glm::normalize(glm::vec3(1.f, 0.f, 0.f))},
+      {glm::vec3(0.f, 0.1f, 0.5f), glm::normalize(glm::vec3(1.f, 1.f, 0.f))},
+      {glm::vec3(-1.f), glm::normalize(glm::vec3(1.f, 0.f, 0.f))},
+      {glm::vec3(1.1f), glm::normalize(glm::vec3(1.f, 1.f, 0.f))},
+      {glm::vec3(2.f), glm::normalize(glm::vec3(-1.f))},
+  };
+
+  for (int i = 0; i < sizeof(boxes) / sizeof(AABB); i++) {
+    float dist;
+    bool intersec = boxes[i].intersect(ray[i], dist);
+    std::cout << intersec << " " << dist << "\n";
+  }
+}
+
+/**
+ * GLM intersection returns false when triangle is back-faced
+ */
+void testTriangle() {
+  glm::vec3 v[] = {glm::vec3(-1.f, -1.f, 0.f), glm::vec3(1.f, -1.f, 0.f),
+                   glm::vec3(1.f, 1.f, 0.f)};
+  glm::vec3 ori(0.f, 0.f, 1.f);
+  glm::vec3 dir(0.f, 0.f, -1.f);
+  glm::vec2 bary;
+  float dist;
+  bool hit = intersectTriangle({ori, dir}, v[0], v[1], v[2], bary, dist);
+  std::cout << hit << " "
+            << vec3ToString(glm::vec3(1.f - bary.x - bary.y, bary)) << "\n";
+  glm::vec3 hitPos =
+      v[0] * (1.f - bary.x - bary.y) + v[1] * bary.x + v[2] * bary.y;
+  std::cout << vec3ToString(hitPos) << "\n";
+  hit = intersectTriangle({-ori, -dir}, v[0], v[1], v[2], bary, dist);
+  std::cout << hit << " "
+            << vec3ToString(glm::vec3(1.f - bary.x - bary.y, bary)) << "\n";
+}
+
+void testDiscreteSampler() {
+  std::vector<float> distrib = {.1f, .2f, .3f, .4f, 2.f, 3.f, 4.f};
+
+  DiscreteSampler<float> sampler(distrib);
+
+  int stats[7] = {0, 0, 0, 0, 0, 0, 0};
+
+  thrust::default_random_engine rng(time(nullptr));
+
+  for (int i = 0; i < 100000; i++) {
+    float r1 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+    float r2 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+    stats[sampler.sample(r1, r2)]++;
+  }
+
+  for (auto i : stats) {
+    std::cout << i << " ";
+  }
+  std::cout << "\n";
+}
+
 int main(int argc, char **argv) {
   startTimeString = currentTimeString();
 
@@ -41,9 +105,10 @@ int main(int argc, char **argv) {
 
   const char *sceneFile = argv[1];
 
+  testDiscreteSampler();
+  exit(0);
   // Load scene file
   scene = new Scene(sceneFile);
-  exit(0);
 
   // Create Instance for ImGUIData
   guiData = new GuiDataContainer();
@@ -78,9 +143,11 @@ int main(int argc, char **argv) {
   InitImguiData(guiData);
   InitDataContainer(guiData);
 
+  scene->buildDevData();
   // GLFW main loop
   mainLoop();
 
+  scene->clear();
   Resource::clear();
 
   return 0;
@@ -132,8 +199,8 @@ void runCuda() {
   }
 
   // Map OpenGL buffer object for writing from CUDA on a single GPU
-  // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use
-  // this buffer
+  // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not
+  // use this buffer
 
   if (iteration == 0) {
     pathTraceFree();

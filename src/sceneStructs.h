@@ -4,6 +4,8 @@
 
 #include "glm/glm.hpp"
 
+#include <iomanip>
+
 #include <string>
 #include <vector>
 
@@ -19,6 +21,9 @@ enum GeomType {
 };
 
 struct Ray {
+  __host__ __device__ glm::vec3 getPoint(float dist) {
+    return origin + direction * dist;
+  }
   glm::vec3 origin;
   glm::vec3 direction;
 };
@@ -68,7 +73,7 @@ struct PathSegment {
 // 1) color contribution computation
 // 2) BSDF evaluation: generate a new ray
 struct Intersection {
-  float dist;
+  int primitive;
   glm::vec3 position;
   glm::vec3 surfaceNormal;
   glm::vec2 surfaceUV;
