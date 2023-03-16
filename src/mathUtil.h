@@ -41,6 +41,35 @@ template <typename T> bool between(const T &x, const T &min, const T &max) {
 
 __host__ __device__ inline float square(float x) { return x * x; }
 
+__host__ __device__ inline float powerHeuristic(float f, float g) {
+  float f2 = f * f;
+  return (f2) / (f2 + g * g);
+}
+
+__host__ __device__ inline float balanceHeuristic(float f, float g) {
+  return f / (f + g);
+}
+
+__host__ __device__ inline float triangleArea(glm::vec3 v0, glm::vec3 v1,
+                                              glm::vec3 v2) {
+  return glm::length(glm::cross(v1 - v0, v2 - v0)) * 0.5f;
+}
+
+__host__ __device__ inline glm::vec3 triangleNormal(glm::vec3 v0, glm::vec3 v1,
+                                                    glm::vec3 v2) {
+  return glm::normalize(glm::cross(v1 - v0, v2 - v0));
+}
+
+__host__ __device__ static glm::vec3 sampleTriangleUniform(glm::vec3 v0,
+                                                           glm::vec3 v1,
+                                                           glm::vec3 v2,
+                                                           float ru, float rv) {
+  float r = glm::sqrt(rv);
+  float u = 1.f - r;
+  float v = ru * r;
+  return v1 * u + v2 * v + v0 * (1.f - u - v);
+}
+
 template <typename T> __host__ __device__ inline T calcFilmic(T c) {
   return (c * (c * 0.22f + 0.03f) + 0.002f) / (c * (c * 0.22f + 0.3f) + 0.06f) -
          1.f / 30.f;
@@ -66,6 +95,10 @@ __host__ __device__ inline glm::vec3 ACES(glm::vec3 color) {
 
 __host__ __device__ inline glm::vec3 gammaCorrection(glm::vec3 color) {
   return glm::pow(color, glm::vec3(1.f / 2.2f));
+}
+
+__host__ __device__ inline float luminance(glm::vec3 color) {
+  return 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
 }
 
 __device__ static glm::vec2 concentricSampleDisk(float x, float y) {
@@ -113,12 +146,10 @@ __device__ static bool refract(glm::vec3 n, glm::vec3 wi, float ior,
   return true;
 }
 
-__device__ inline float areaPdfToSolidAngle(float pdf, glm::vec3 ref,
-                                            glm::vec3 y, glm::vec3 ny) {
-  glm::vec3 yToRef = ref - y;
-  float dist2 = glm::dot(yToRef, yToRef);
-
-  return pdf * absDot(ny, glm::normalize(yToRef)) / dist2;
+__device__ inline float pdfAreaToSolidAngle(float pdf, glm::vec3 x, glm::vec3 y,
+                                            glm::vec3 ny) {
+  glm::vec3 yx = x - y;
+  return pdf * absDot(ny, glm::normalize(yx)) / glm::dot(yx, yx);
 }
 
 /**

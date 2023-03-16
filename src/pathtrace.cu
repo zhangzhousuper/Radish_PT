@@ -184,8 +184,21 @@ __global__ void pathIntegSampleSurface(int iter, PathSegment *segments,
 
   // TODO
   // perform light area sampling and MIS
-  // segment.radiance = material.baseColor;
+  bool deltaBSDF = material.type == Material::Type::Dielectric;
 
+  if (!deltaBSDF) {
+    glm::vec3 radiance;
+    glm::vec3 wi;
+    float lightPdf = scene->sampleDirectLight(intersec.position, sample4D(rng),
+                                              radiance, wi);
+    float BSDFPdf =
+        material.pdf(intersec.surfaceNormal, intersec.incomingDir, wi);
+    segment.radiance +=
+        segment.throughput *
+        material.BSDF(intersec.surfaceNormal, intersec.incomingDir, wi) *
+        radiance * glm::dot(intersec.surfaceNormal, wi) *
+        Math::powerHeuristic(lightPdf, BSDFPdf) / lightPdf;
+  }
 #if BVH_DEBUG_VISUALIZATION
   float logDepth = 0.f;
   int size = scene->BVHSize;
@@ -207,9 +220,14 @@ __global__ void pathIntegSampleSurface(int iter, PathSegment *segments,
         segment.throughput * material.emittance * material.baseColor;
     segment.remainingBounces = 0;
   } else {
+    if (material.type != Material::Type::Dielectric &&
+        glm::dot(intersec.surfaceNormal, intersec.incomingDir) < 0.f) {
+      intersec.surfaceNormal = -intersec.surfaceNormal;
+    }
+
     BSDFSample sample;
-    materialSample(intersec.surfaceNormal, intersec.incomingDir, material,
-                   sample3D(rng), sample);
+    material.sample(intersec.surfaceNormal, intersec.incomingDir, material,
+                    sample3D(rng), sample);
     if (sample.type == BSDFSampleType::Invalid) {
       // Terminate path if sampling fails
       segment.remainingBounces = 0;
@@ -310,8 +328,8 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
         iter, dev_paths, dev_intersections, hstScene->devScene, num_paths);
     checkCUDAError("PT::sampleSurface");
     cudaDeviceSynchronize();
-    // Compact paths that are terminated but carry contribution into a separate
-    // buffer
+    // Compact paths that are terminated but carry contribution into a
+    // separate buffer
     dev_terminated_thrust =
         thrust::remove_copy_if(dev_path_thrust, dev_path_thrust + num_paths,
                                dev_terminated_thrust, CompactTerminatedPaths());

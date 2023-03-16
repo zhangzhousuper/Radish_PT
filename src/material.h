@@ -11,30 +11,6 @@
 #define INVALID_PDF -1.f;
 #define MATERIAL_DIELETRIC_USE_SCHLICK_APPROX false
 
-struct Material {
-  enum Type { Lambertian, Metallic, Dielectric, Disney, Light };
-
-  std::string toString() const {
-    std::stringstream ss;
-    ss << "[Type = " << type << ", BaseColor = " << vec3ToString(baseColor)
-       << "]";
-    return ss.str();
-  }
-
-  int type;
-  glm::vec3 baseColor;
-  struct {
-    float exponent;
-    glm::vec3 color;
-  } specular;
-  float metallic;
-  float roughness;
-  float ior;
-  float emittance;
-
-  int textureId;
-};
-
 enum BSDFSampleType {
   Diffuse = 1 << 0,
   Glossy = 1 << 1,
@@ -75,64 +51,6 @@ __device__ static float fresnel(float cosIn, float ior) {
   float rPer = (ior * cosIn - cosTr) / (ior * cosIn + cosTr);
   return (rPar * rPar + rPer * rPer) / 2.f;
 #endif
-}
-
-__device__ static glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo,
-                                           glm::vec3 wi,
-                                           const Material &material) {
-  return material.baseColor * Math::satDot(n, wi) * INV_PI;
-  // satDot makes sure that the dot product is positive
-}
-
-__device__ static float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
-                                      const Material &m) {
-  return glm::dot(n, wi) * INV_PI;
-}
-
-__device__ static void lambertianSample(glm::vec3 n, glm::vec3 wo,
-                                        const Material &material, glm::vec3 r,
-                                        BSDFSample &sample) {
-  sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
-  sample.bsdf = material.baseColor * INV_PI;
-  sample.pdf = glm::dot(n, sample.dir) * INV_PI;
-  sample.type = BSDFSampleType::Diffuse | BSDFSampleType::Reflection;
-}
-
-__device__ static glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wi,
-                                           const Material &material) {
-  return glm::vec3(0.f);
-}
-
-__device__ static float dielectricPDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
-                                      const Material &material) {
-  return 0.f;
-}
-
-__device__ static void dielectricSample(glm::vec3 n, glm::vec3 wo,
-                                        const Material &material, glm::vec3 r,
-                                        BSDFSample &sample) {
-  float ior = material.ior;
-  float pdfReflection = fresnel(glm::dot(n, wo), ior);
-
-  sample.bsdf = material.baseColor;
-
-  if (r.z < pdfReflection) {
-    sample.type = BSDFSampleType::Specular | BSDFSampleType::Reflection;
-    sample.dir = glm::reflect(-wo, n);
-    sample.pdf = 1.f;
-  } else {
-    bool result = Math::refract(n, wo, ior, sample.dir);
-    if (!result) {
-      sample.type = BSDFSampleType::Invalid;
-      return;
-    }
-    if (glm::dot(n, wo) < 0) {
-      ior = 1.f / ior;
-    }
-    sample.type = BSDFSampleType::Specular | BSDFSampleType::Transmission;
-    sample.pdf = 1.f;
-    sample.bsdf /= ior * ior;
-  }
 }
 
 // cosTheta is the cosine of the angle between the normal and the direction
@@ -192,101 +110,161 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha,
   return transMat * h;
 }
 
-__device__ static glm::vec3 metallicBSDF(glm::vec3 n, glm::vec3 wo,
-                                         glm::vec3 wi,
-                                         const Material &material) {
-  float alpha = material.roughness * material.roughness;
-  glm::vec3 h = glm::normalize(wo + wi);
+struct Material {
+  enum Type { Lambertian, Metallic, Dielectric, Disney, Light };
 
-  float cosThetaO = glm::dot(n, wo);
-  float cosThetaI = glm::dot(n, wi);
-  if (cosThetaI * cosThetaO <= 1e-7f) {
-    return glm::vec3(0.f);
+  std::string toString() const {
+    std::stringstream ss;
+    ss << "[Type = " << type << ", BaseColor = " << vec3ToString(baseColor)
+       << "]";
+    return ss.str();
   }
 
-  glm::vec3 f =
-      fresnelSchlick(glm::dot(h, wo), material.baseColor * material.metallic);
-  float d = ggxDistribution(glm::dot(n, h), alpha);
-  float g = smithG(cosThetaO, cosThetaI, alpha);
+  __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    return baseColor * Math::satDot(n, wi) * INV_PI;
+  }
 
-  return glm::mix(material.baseColor * (1.f - material.metallic),
-                  glm::vec3(g * d / (4.f * cosThetaO * cosThetaI)), f);
-}
+  __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    return Math::dot(n, wi) * INV_PI;
+  }
 
-__device__ static float metallicPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
-                                    const Material &material) {
-  glm::vec3 h = glm::normalize(wo + wi);
-  return glm::mix(Math::satDot(n, wi) * INV_PI,
-                  ggxPdf(n, h, wo, material.roughness * material.roughness) /
-                      (4.f * Math::absDot(h, wo)),
-                  1.f / (2.f - material.metallic));
-}
-
-__device__ static void metallicSample(glm::vec3 n, glm::vec3 wo,
-                                      const Material &material, glm::vec3 r,
-                                      BSDFSample &sample) {
-  float alpha = material.roughness * material.roughness;
-
-  if (r.z > (1.f / 2.f - material.metallic)) {
+  __device__ glm::vec3 lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec2 r,
+                                        BSDFSample &sample) {
     sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
-  } else {
-    glm::vec3 h = ggxSample(n, wo, alpha, glm::vec2(r.x, r.y));
-    sample.dir = -glm::reflect(wo, h);
+    sample.bsdf = baseColor * INV_PI;
+    sample.pdf = glm::dot(n, sample.dir) * INV_PI;
+    sample.type = Diffuse | Reflection;
   }
 
-  if (glm::dot(n, sample.dir) < 0.f) {
-    sample.type = Invalid;
-  } else {
-    sample.type = BSDFSampleType::Reflection | BSDFSampleType::Glossy;
-    sample.pdf = metallicPdf(n, wo, sample.dir, material);
-    sample.bsdf = metallicBSDF(n, wo, sample.dir, material);
-  }
-}
-
-__device__ static glm::vec3 materialBSDF(glm::vec3 n, glm::vec3 wo,
-                                         glm::vec3 wi,
-                                         const Material &material) {
-  switch (material.type) {
-  case Material::Lambertian:
-    return lambertianBSDF(n, wo, wi, material);
-  case Material::Type::Metallic:
-    return metallicBSDF(n, wo, wi, material);
-  case Material::Dielectric:
-    return dielectricBSDF(n, wi, material);
-  default:
+  __device__ glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     return glm::vec3(0.f);
   }
-}
 
-__device__ static float materialPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
-                                    const Material &material) {
-  switch (material.type) {
-  case Material::Lambertian:
-    return lambertianPdf(n, wo, wi, material);
-  case Material::Type::Metallic:
-    return metallicPdf(n, wo, wi, material);
-  case Material::Dielectric:
-    return dielectricPDF(n, wo, wi, material);
-  default:
+  __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     return 0.f;
   }
-}
 
-__device__ static void materialSample(glm::vec3 n, glm::vec3 wo,
-                                      const Material &material, glm::vec3 r,
-                                      BSDFSample &sample) {
-  switch (material.type) {
-  case Material::Lambertian:
-    lambertianSample(n, wo, material, r, sample);
-    break;
-  case Material::Metallic:
-    metallicSample(n, wo, material, r, sample);
-    break;
-  case Material::Dielectric:
-    dielectricSample(n, wo, material, r, sample);
-    break;
-  default:
-    sample.type = Invalid;
-    break;
+  __device__ void dielectricSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
+                                   BSDFSample &sample) {
+    float pdfRefl = fresnel(glm::dot(n, wo), ior);
+
+    sample.bsdf = baseColor;
+
+    if (r.z < pdfRefl) {
+      sample.dir = Math::reflect(-wo, n);
+      sample.type = Specular | Reflection;
+      sample.pdf = 1.f;
+    } else {
+      bool result = Math::refract(n, wo, ior, sample.dir);
+      if (!result) {
+        sample.type = Invalid;
+        return;
+      }
+      if (glm::dot(n, wo) < 0) {
+        ior = 1.f / ior;
+      }
+      sample.type = Specular | Transmission;
+      sample.pdf = 1.f;
+      sample.bsdf /= ior * ior;
+    }
   }
-}
+
+  __device__ glm::vec3 metallicBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    float alpha = roughness * roughness;
+    glm::vec3 h = glm::normalize(wo + wi);
+
+    float cosO = glm::dot(n, wo);
+    float cosI = glm::dot(n, wi);
+    if (cosI * cosO < 1e-7f) {
+      return glm::vec3(0.f);
+    }
+
+    glm::vec3 f = fresnelSchlick(glm::dot(h, wo), baseColor * metallic);
+    float d = ggxDistribution(glm::dot(n, h), alpha);
+    float g = smithG(cosO, cosI, alpha);
+
+    return glm::mix(baseColor * INV_PI * (1.f - metallic),
+                    glm::vec3(g * d / (4.f * cosI * cosO)), f);
+  }
+
+  __device__ float metallicPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    glm::vec3 h = glm::normalize(wo + wi);
+    return glm::mix(Math::satDot(n, wi) * INV_PI,
+                    ggxPdf(n, h, wo, roughness * roughness) /
+                        (4.f * Math::absDot(h, wo)),
+                    1.f / (2.f - metallic));
+  }
+
+  __device__ void metallicSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
+                                 BSDFSample &sample) {
+    float alpha = roughness * roughness;
+
+    if (r.z > (1.f / 2.f - metallic)) {
+      sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
+    } else {
+      glm::vec3 h = ggxSample(n, wo, alpha, glm::vec2(r.x, r.y));
+      sample.dir = -glm::reflect(wo, h);
+    }
+
+    if (glm::dot(n, sample.dir) < 0.f) {
+      sample.type = Invalid;
+    } else {
+      sample.type = Glossy | Reflection;
+      sample.pdf = metallicPdf(n, wo, sample.dir);
+      sample.bsdf = metallicBSDF(n, wo, sample.dir);
+    }
+  }
+
+  __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
+                            const Material &material) {
+    switch (material.type) {
+    case Material::Lambertian:
+      return lambertianBSDF(n, wo, wi);
+    case Material::Type::Metallic:
+      return metallicBSDF(n, wo, wi);
+    case Material::Dielectric:
+      return dielectricBSDF(n, wo, wi);
+    }
+
+    return glm::vec3(0.f);
+  }
+
+  __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
+                       const Material &material) {
+    switch (material.type) {
+    case Material::Lambertian:
+      return lambertianPdf(n, wo, wi);
+    case Material::Type::Metallic:
+      return metallicPdf(n, wo, wi);
+    case Material::Dielectric:
+      return dielectricPDF(n, wo, wi);
+    default:
+      return 0.f;
+    }
+  }
+
+  __device__ void sample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
+                         BSDFSample &sample) {
+    switch (type) {
+    case Material::Type::Lambertian:
+      lambertianSample(n, wo, r, sample);
+      break;
+    case Material::Type::Metallic:
+      metallicSample(n, wo, r, sample);
+      break;
+    case Material::Type::Dielectric:
+      dielectricSample(n, wo, r, sample);
+      break;
+    default:
+      sample.type = Invalid;
+    }
+  }
+  int type;
+  glm::vec3 baseColor;
+  float metallic;
+  float roughness;
+  float ior;
+  float emittance;
+
+  int textureId;
+};
