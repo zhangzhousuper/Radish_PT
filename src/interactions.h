@@ -4,14 +4,6 @@
 
 #include <thrust/random.h>
 
-__host__ __device__ inline Ray makeRay(glm::vec3 ori, glm::vec3 dir) {
-  return {ori, dir};
-}
-
-__host__ __device__ inline Ray makeOffsetedRay(glm::vec3 ori, glm::vec3 dir) {
-  return {ori + dir * 0.001f, dir};
-}
-
 // CHECKITOUT
 /**
  * Computes a cosine-weighted random direction in a hemisphere.

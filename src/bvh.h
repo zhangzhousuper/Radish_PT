@@ -8,9 +8,10 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/intersect.hpp>
 
+#include "mathUtil.h"
 #include "sceneStructs.h"
 
-#define BVHNodeNonLeaf -1
+#define NullPrimitive -1
 struct AABB {
   AABB() = default;
 
@@ -37,8 +38,9 @@ struct AABB {
   std::string toString() const {
     std::stringstream ss;
     ss << "[AABB "
-       << "pMin = " << pMin.x << " " << pMin.y << " " << pMin.z;
-    ss << ", pMax = " << pMax.x << " " << pMax.y << " " << pMax.z << "]";
+       << "pMin = " << vec3ToString(pMin);
+    ss << ", pMax = " << vec3ToString(pMax);
+    ss << ", center = " << vec3ToString(this->center()) << "]";
     return ss.str();
   }
   __host__ __device__ glm::vec3 center() const { return (pMin + pMax) * 0.5f; }
@@ -57,37 +59,44 @@ struct AABB {
     }
   }
 
-  __host__ __device__ bool intersect(Ray ray, float &dist) {
+  __host__ __device__ bool getDistMinMax(float tMin1, float tMin2, float tMax1,
+                                         float tMax2, float &tMin) {
+    tMin = fminf(tMin1, tMin2);
+    float tMax = fmaxf(tMax1, tMax2);
+    return tMax >= 0.f && tMax >= tMin;
+  }
+
+  __host__ __device__ bool getDistMaxMin(float tMin1, float tMin2, float tMax1,
+                                         float tMax2, float &tMin) {
+    tMin = fmaxf(tMin1, tMin2);
+    float tMax = fminf(tMax1, tMax2);
+    return tMax >= 0.f && tMax >= tMin;
+  }
+
+  __host__ __device__ bool intersect(Ray ray, float &tMin) {
     const float eps = 1e-6f;
+    float tMax;
 
     glm::vec3 ori = ray.origin;
     glm::vec3 dir = ray.direction;
 
-    glm::vec3 t1 = (pMin - ori) / dir;
-    glm::vec3 t2 = (pMax - ori) / dir;
-
-    glm::vec3 ta = glm::min(t1, t2);
-    glm::vec3 tb = glm::max(t1, t2);
-
-    float tMin = -FLT_MAX;
-    float tMax = FLT_MAX;
-
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-      if (glm::abs(dir[i]) > eps) {
-        if (tb[i] >= 0.f && ta[i] <= tb[i]) {
-          tMin = glm::max(tMin, ta[i]);
-          tMax = glm::min(tMax, tb[i]);
-        }
+    if (glm::abs(dir.x) > 1.f - eps) {
+      if (Math::between(ori.y, pMin.y, pMax.y) &&
+          < Math::between(ori.z, pMin.z, pMax.z)) {
+        float dirInvX = 1.f / dir.x;
+        float t1 = (pMin.x - ori.x) * dirInvX;
+        float t2 = (pMax.x - ori.x) * dirInvX;
+        return getDistMinMax(t1, t2, t1, t2, tMin);
+      } else {
+        return false;
       }
     }
-    dist = tMin;
 
-    if (tMax >= 0.f && tMin <= tMax) {
-      glm::vec3 mid = ray.getPoint((tMin + tMax) * 0.5f);
+    if (tMax >= 0.f && tMax >= tMin - eps) {
+      glm::vec3 mid = ray.getPoint((tMin + tMax) * .5f);
 #pragma unroll
-      for (int i = 0; i < 3; ++i) {
-        if (mid[i] < pMin[i] || mid[i] > pMax[i]) {
+      for (int i = 0; i < 3; i++) {
+        if (mid[i] <= pMin[i] - eps || mid[i] >= pMax[i] + eps) {
           return false;
         }
       }
@@ -95,6 +104,7 @@ struct AABB {
     }
     return false;
   }
+
   glm::vec3 pMin = glm::vec3(FLT_MAX);
   glm::vec3 pMax = glm::vec3(-FLT_MAX);
 };
