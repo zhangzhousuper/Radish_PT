@@ -82,7 +82,7 @@ struct AABB {
 
     if (glm::abs(dir.x) > 1.f - eps) {
       if (Math::between(ori.y, pMin.y, pMax.y) &&
-          < Math::between(ori.z, pMin.z, pMax.z)) {
+          Math::between(ori.z, pMin.z, pMax.z)) {
         float dirInvX = 1.f / dir.x;
         float t1 = (pMin.x - ori.x) * dirInvX;
         float t2 = (pMax.x - ori.x) * dirInvX;

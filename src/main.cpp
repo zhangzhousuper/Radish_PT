@@ -159,9 +159,19 @@ void saveImage() {
   for (int x = 0; x < width; x++) {
     for (int y = 0; y < height; y++) {
       int index = x + (y * width);
-      glm::vec3 pix = renderState->image[index] / samples;
-      pix = Math::gammaCorrection(Math::ACES(pix));
-      img.setPixel(width - 1 - x, y, pix);
+      glm::vec3 color = renderState->image[index] / samples;
+      switch (Settings::toneMapping) {
+      case ToneMapping::Filmic:
+        color = Math::filmic(color);
+        break;
+      case ToneMapping::ACES:
+        color = Math::ACES(color);
+        break;
+      case ToneMapping::None:
+        break;
+      }
+      color = Math::gammaCorrection(color);
+      img.setPixel(width - 1 - x, y, color);
     }
   }
 
@@ -234,6 +244,9 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action,
       break;
     case GLFW_KEY_S:
       saveImage();
+      break;
+    case GLFW_KEY_T:
+      Settings::toneMapping = (Settings::toneMapping + 1) % 3;
       break;
     case GLFW_KEY_SPACE:
       camchanged = true;

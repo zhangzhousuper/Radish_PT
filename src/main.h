@@ -1,7 +1,7 @@
 #pragma once
 
 #include <GL/glew.h>
-#include <GLFW/sd3.h>
+#include <GLFW/glfw3.h>
 
 #include "glslUtility.hpp"
 #include <cuda_gl_interop.h>

@@ -1,27 +1,28 @@
 #pragma once
 
-#include "cudaUtil.h"
-#include "glm/glm.hpp"
-#include "glm/gtx/intersect.hpp"
-#include "image.h"
-#include "intersections.h"
-#include "material.h"
-#include "sampler.h"
-#include "sceneStructs.h"
-#include "tiny_obj_loader.h"
-#include "utilities.h"
 #include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <vector>
 
+#include "tiny_obj_loader.h"
+
+#include "glm/glm.hpp"
+
+#include "cudaUtil.h"
+
+#include "intersections.h"
+
+#include "image.h"
+#include "material.h"
+#include "sampler.h"
+#include "sceneStructs.h"
+#include "utilities.h"
+
+#include "common.h"
+
 using namespace std;
-
-#define MESH_DATA_STRUCT_OF_ARRAY false
-#define MESH_DATA_INDEXED false
-
-#define DEV_SCENE_PASS_BY_CONST_MEM false
 
 struct MeshData {
   void clear() {
@@ -110,12 +111,9 @@ struct DevScene {
     glm::vec2 tb = dev_texcoords[primId * 3 + 1];
     glm::vec2 tc = dev_texcoords[primId * 3 + 2];
 
-    intersec.position =
-        vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    intersec.surfaceNormal =
-        nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
-    intersec.surfaceUV =
-        tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
+    intersec.pos = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
+    intersec.norm = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
+    intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
   }
 
   __device__ bool intersectPrim(int primId, Ray ray, float &dist,
@@ -162,13 +160,54 @@ struct DevScene {
     glm::vec2 tb = dev_texcoords[primId * 3 + 1];
     glm::vec2 tc = dev_texcoords[primId * 3 + 2];
 
-    intersec.position =
-        vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    intersec.surfaceNormal =
-        nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
-    intersec.surfaceUV =
-        tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
+    intersec.pos = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
+    intersec.norm = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
+    intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
     return true;
+  }
+
+  __device__ void naiveIntersect(Ray ray, Intersection &intersec) {
+    float closestDist = FLT_MAX;
+    glm::vec2 closestBary;
+    int closestPrimId = NullPrimitive;
+
+    for (int i = 0; i < (BVHSize + 1) / 2; i++) {
+      float dist;
+      glm::vec2 bary;
+      bool hit = intersectPrim(i, ray, dist, bary);
+
+      if (hit && dist < closestDist) {
+        closestDist = dist;
+        closestBary = bary;
+        closestPrimId = i;
+      }
+    }
+
+    if (closestPrimId != NullPrimitive) {
+      intersec.primId = closestPrimId;
+      intersec.matId = dev_materialIds[closestPrimId];
+      getIntersecGeomInfo(closestPrimId, closestBary, intersec);
+    } else {
+      intersec.primId = NullPrimitive;
+    }
+  }
+
+  __device__ bool naiveTestOcclusion(glm::vec3 x, glm::vec3 y) {
+    const float eps = 1e-4f;
+
+    glm::vec3 dir = y - x;
+    float dist = glm::length(dir);
+    dir /= dist;
+    dist -= eps;
+
+    Ray ray = makeOffsetedRay(x, dir);
+
+    for (int i = 0; i < (BVHSize + 1) / 2; i++) {
+      if (intersectPrim(i, ray, dist)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   __device__ void intersect(Ray ray, Intersection &intersec) {
@@ -207,16 +246,15 @@ struct DevScene {
 
     if (closestPrimId != NullPrimitive) {
       getIntersecGeomInfo(closestPrimId, closestBary, intersec);
-      intersec.materialId = dev_materialIds[closestPrimId];
-      intersec.primitive = closestPrimId;
-      intersec.incomingDir = -ray.direction;
+      intersec.matId = dev_materialIds[closestPrimId];
+      intersec.primId = closestPrimId;
     } else {
-      intersec.primitive = NullPrimitive;
+      intersec.primId = NullPrimitive;
     }
   }
 
-  __device__ bool testOcculusion(glm::vec3 x, glm::vec3 y) {
-    const float eps = 0.0001f;
+  __device__ bool testOcclusion(glm::vec3 x, glm::vec3 y) {
+    const float eps = 1e-4f;
 
     glm::vec3 dir = y - x;
     float dist = glm::length(dir);
@@ -224,7 +262,6 @@ struct DevScene {
     dist -= eps;
 
     Ray ray = makeOffsetedRay(x, dir);
-    bool hit = false;
 
     MTBVHNode *nodes = dev_bvh[getMTBVHId(-ray.direction)];
     int node = 0;
@@ -238,14 +275,14 @@ struct DevScene {
         int primId = nodes[node].primitiveId;
 
         if (primId != NullPrimitive) {
-          hit = intersectPrim(primId, ray, dist);
+          return true;
         }
         node++;
       } else {
         node = nodes[node].nextNodeIfMiss;
       }
     }
-    return hit;
+    return false;
   }
 
   __device__ void visualizedIntersect(Ray ray, Intersection &intersec) {
@@ -288,7 +325,7 @@ struct DevScene {
     if (closestPrimId == 0) {
       maxDepth = 100.f;
     }
-    intersec.primitive = maxDepth;
+    intersec.primId = maxDepth;
   }
   /**
    * Returns solid angle probability
@@ -305,19 +342,28 @@ struct DevScene {
     glm::vec3 v2 = dev_vertices[primDId + 2];
     glm::vec3 sampled = Math::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
 
-    if (testOcculusion(pos, sampled)) {
+#if BVH_DISABLE
+    bool occ = naiveTestOcclusion(pos, sampled);
+#else
+    bool occ = testOcclusion(pos, sampled);
+#endif
+    if (occ) {
       return INVALID_PDF;
     }
+
     glm::vec3 normal = Math::triangleNormal(v0, v1, v2);
     glm::vec3 posToSampled = sampled - pos;
 
+#if SCENE_LIGHT_SINGLE_SIDED
     if (glm::dot(normal, posToSampled) > 0.f) {
       return INVALID_PDF;
     }
+#endif
+
     radiance = devLightUnitRadiance[lightId];
     wi = glm::normalize(posToSampled);
-    return Math::pdfAreaToSolidAngle(Math::luminance(radiance) / sumLightPower,
-                                     pos, sampled, normal);
+    return Math::pdfAreaToSolidAngle(
+        Math::luminance(radiance) / sumLightPowerInv, pos, sampled, normal);
   }
 
   glm::vec3 *dev_vertices = nullptr;
@@ -338,7 +384,7 @@ struct DevScene {
   glm::vec3 *devLightUnitRadiance = nullptr;
   BinomialDistribution<float> *devLightDistrib;
   int numLightPrims;
-  float sumLightPower;
+  float sumLightPowerInv;
 };
 
 class Scene {

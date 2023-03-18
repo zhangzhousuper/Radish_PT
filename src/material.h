@@ -121,18 +121,18 @@ struct Material {
   }
 
   __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
-    return baseColor * Math::satDot(n, wi) * INV_PI;
+    return baseColor * INV_PI;
   }
 
   __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
-    return Math::dot(n, wi) * INV_PI;
+    return Math::satDot(n, wi) * INV_PI;
   }
 
   __device__ glm::vec3 lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec2 r,
                                         BSDFSample &sample) {
     sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
     sample.bsdf = baseColor * INV_PI;
-    sample.pdf = glm::dot(n, sample.dir) * INV_PI;
+    sample.pdf = Math::satDot(n, sample.dir) * INV_PI;
     sample.type = Diffuse | Reflection;
   }
 

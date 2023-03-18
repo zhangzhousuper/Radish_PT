@@ -177,20 +177,22 @@ void Scene::buildDevData() {
       meshData.texcoords.push_back(instance.meshData->texcoords[i]);
       if (i % 3 == 0) {
         materialIds.push_back(instance.materialId);
-      } else if (i % 3 == 2 && material.type == Material::Light) {
-        glm::vec3 v0 = meshData.vertices[i - 2];
-        glm::vec3 v1 = meshData.vertices[i - 1];
-        glm::vec3 v2 = meshData.vertices[i];
-        float area = Math::triangleArea(v0, v1, v2);
-        float power = powerUnitArea * area;
+      } else if (i % 3 == 2) {
+        if (material.type == Material::Light) {
+          glm::vec3 v0 = meshData.vertices[i - 2];
+          glm::vec3 v1 = meshData.vertices[i - 1];
+          glm::vec3 v2 = meshData.vertices[i];
+          float area = Math::triangleArea(v0, v1, v2);
+          float power = powerUnitArea * area;
 
-        lightPower.push_back(power);
-        lightPrimIds.push_back(primId);
-        lightUnitRadiance.push_back(radianceUnitArea);
-        sumLightPower += power;
-        numLightPrims++;
+          lightPower.push_back(power);
+          lightPrimIds.push_back(primId);
+          lightUnitRadiance.push_back(radianceUnitArea);
+          sumLightPower += power;
+          numLightPrims++;
+        }
+        primId++;
       }
-      primId++;
     }
   }
 #endif
@@ -437,7 +439,7 @@ void DevScene::create(const Scene &scene) {
   cudaMalloc(&devLightDistrib, byteSizeOf(scene.lightSampler.binomDistribs));
   cudaMemcpyHostToDev(devLightDistrib, scene.lightSampler.binomDistribs.data(),
                       byteSizeOf(scene.lightSampler.binomDistribs));
-  sumLightPower = scene.sumLightPower;
+  sumLightPowerInv = 1.f / scene.sumLightPower;
 
   checkCUDAError("DevScene::meshData");
 }
@@ -456,6 +458,6 @@ void DevScene::destroy() {
   }
 
   cudaSafeFree(devLightPrimIds);
-  cudaSafeFree(devLightPower);
+  cudaSafeFree(devLightUnitRadiance);
   cudaSafeFree(devLightDistrib);
 }

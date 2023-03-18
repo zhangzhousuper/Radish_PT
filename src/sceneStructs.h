@@ -61,22 +61,42 @@ struct RenderState {
   std::string imageName;
 };
 
+// Use with a corresponding PathSegment to do:
+// 1) color contribution computation
+// 2) BSDF evaluation: generate a new ray
 struct PathSegment {
   Ray ray;
   glm::vec3 throughput;
   glm::vec3 radiance;
+  float BSDFPdf;
+  bool deltaSample;
   int pixelIndex;
   int remainingBounces;
 };
 
-// Use with a corresponding PathSegment to do:
-// 1) color contribution computation
-// 2) BSDF evaluation: generate a new ray
+struct Material;
 struct Intersection {
-  int primitive;
-  glm::vec3 position;
-  glm::vec3 surfaceNormal;
-  glm::vec2 surfaceUV;
-  glm::vec3 incomingDir;
-  int materialId;
+  __device__ Intersection() {}
+
+  __device__ Intersection(const Intersection &rhs) { *this = rhs; }
+
+  __device__ void operator=(const Intersection &rhs) {
+    primId = rhs.primId;
+    matId = rhs.matId;
+    pos = rhs.pos;
+    norm = rhs.norm;
+    uv = rhs.uv;
+    wo = rhs.wo;
+  }
+  int primId;
+  int matId;
+
+  glm::vec3 pos;
+  glm::vec3 norm;
+  glm::vec2 uv;
+
+  union {
+    glm::vec3 wo;
+    glm::vec3 prevPos;
+  };
 };
