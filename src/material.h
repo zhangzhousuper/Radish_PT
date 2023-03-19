@@ -113,13 +113,6 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha,
 struct Material {
   enum Type { Lambertian, Metallic, Dielectric, Disney, Light };
 
-  std::string toString() const {
-    std::stringstream ss;
-    ss << "[Type = " << type << ", BaseColor = " << vec3ToString(baseColor)
-       << "]";
-    return ss.str();
-  }
-
   __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     return baseColor * INV_PI;
   }
@@ -143,7 +136,6 @@ struct Material {
   __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     return 0.f;
   }
-
   __device__ void dielectricSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
                                    BSDFSample &sample) {
     float pdfRefl = fresnel(glm::dot(n, wo), ior);
@@ -151,7 +143,7 @@ struct Material {
     sample.bsdf = baseColor;
 
     if (r.z < pdfRefl) {
-      sample.dir = Math::reflect(-wo, n);
+      sample.dir = glm::reflect(-wo, n);
       sample.type = Specular | Reflection;
       sample.pdf = 1.f;
     } else {
@@ -215,9 +207,8 @@ struct Material {
     }
   }
 
-  __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
-                            const Material &material) {
-    switch (material.type) {
+  __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    switch (type) {
     case Material::Lambertian:
       return lambertianBSDF(n, wo, wi);
     case Material::Type::Metallic:
@@ -229,15 +220,14 @@ struct Material {
     return glm::vec3(0.f);
   }
 
-  __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi,
-                       const Material &material) {
-    switch (material.type) {
+  __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+    switch (type) {
     case Material::Lambertian:
       return lambertianPdf(n, wo, wi);
     case Material::Type::Metallic:
       return metallicPdf(n, wo, wi);
     case Material::Dielectric:
-      return dielectricPDF(n, wo, wi);
+      return dielectricPdf(n, wo, wi);
     default:
       return 0.f;
     }
@@ -266,5 +256,6 @@ struct Material {
   float ior;
   float emittance;
 
-  int textureId;
+  int baseColorMapId;
+  int normalMapId;
 };

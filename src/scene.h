@@ -14,6 +14,7 @@
 
 #include "intersections.h"
 
+#include "bvh.h"
 #include "image.h"
 #include "material.h"
 #include "sampler.h"
@@ -247,9 +248,9 @@ struct DevScene {
     if (closestPrimId != NullPrimitive) {
       getIntersecGeomInfo(closestPrimId, closestBary, intersec);
       intersec.matId = dev_materialIds[closestPrimId];
-      intersec.primId = closestPrimId;
+
     } else {
-      intersec.primId = NullPrimitive;
+      intersec.primId = closestPrimId;
     }
   }
 
@@ -406,7 +407,6 @@ private:
 
 public:
   RenderState state;
-  std::vector<Geom> geoms;
 
   std::vector<Material> materials;
   std::vector<Image *> textures;

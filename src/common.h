@@ -1,5 +1,6 @@
 #pragma once
 #include <iostream>
+#include <sys/stat.h>
 
 #define MESH_DATA_STRUCT_OF_ARRAY false
 #define MESH_DATA_INDEXED false
@@ -8,15 +9,25 @@
 
 #define SCENE_LIGHT_SINGLE_SIDED true
 
-#define BVH_DEBUG_VISUALIZATION false
 #define BVH_DISABLE false
+
+#define ENABLE_GBUFFER false
 
 struct ToneMapping {
   enum { None = 0, Filmic = 1, ACES = 2 };
 };
 
+struct Tracer {
+  enum { Streamed = 0, SingleKernel = 1, BVHVisualize = 2 };
+};
+
 struct Settings {
+  static int traceDepth;
   static int toneMapping;
-  static bool visualizeBVH;
+  static int tracer;
   static bool sortMaterial;
+};
+
+struct State {
+  static bool camChanged;
 };

@@ -300,7 +300,7 @@ void Scene::loadCamera() {
     } else if (tokens[0] == "Sample") {
       state.iterations = std::stoi(tokens[1]);
     } else if (tokens[0] == "Depth") {
-      state.traceDepth = std::stoi(tokens[1]);
+      Settings::traceDepth = std::stoi(tokens[1]);
     } else if (tokens[0] == "File") {
       state.imageName = tokens[1];
     }

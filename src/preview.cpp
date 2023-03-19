@@ -1,5 +1,6 @@
 // #define _CRT_SECURE_NO_DEPRECATE
 #include "preview.h"
+#include "GLFW/glfw3.h"
 #include "ImGui/imgui.h"
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"
@@ -147,6 +148,7 @@ bool init() {
   }
   glfwMakeContextCurrent(window);
   glfwSetKeyCallback(window, keyCallback);
+  glfwSetScrollCallback(window, mouseScrollCallback);
   glfwSetCursorPosCallback(window, mousePositionCallback);
   glfwSetMouseButtonCallback(window, mouseButtonCallback);
 
@@ -206,7 +208,25 @@ void RenderImGui() {
 
   ImGui::Begin("Options");
   {
-    ImGui::Checkbox("Sort material", &Settings::sortMaterial);
+    const char *Tracers[] = {"Streamed", "Single Kernel", "BVH Visualize"};
+    if (ImGui::Combo("Tracer", &Settings::tracer, Tracers,
+                     IM_ARRAYSIZE(Tracers))) {
+      State::camChanged = true;
+    }
+
+    if (Settings::tracer == Tracer::Streamed) {
+      ImGui::Checkbox("Sort Material", &Settings::sortMaterial);
+    }
+
+    if (ImGui::InputInt("Max Depth", &Settings::traceDepth, 1, 1)) {
+      State::camChanged = true;
+    }
+    ImGui::Separator();
+
+    ImGui::Text("Post Processing");
+    const char *ToneMappingMethods[] = {"None", "Filmic", "ACES"};
+    ImGui::Combo("Tone Mapping", &Settings::toneMapping, ToneMappingMethods,
+                 IM_ARRAYSIZE(ToneMappingMethods));
 
     ImGui::End();
   }

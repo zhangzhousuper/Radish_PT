@@ -9,16 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "bvh.h"
 #include "material.h"
-
-#define BACKGROUND_COLOR (glm::vec3(0.0f))
-
-enum GeomType {
-  SPHERE = 0,
-  CUBE = 1,
-  MESH = 2,
-};
 
 struct Ray {
   __host__ __device__ glm::vec3 getPoint(float dist) {
@@ -26,17 +17,6 @@ struct Ray {
   }
   glm::vec3 origin;
   glm::vec3 direction;
-};
-
-struct Geom {
-  GeomType type;
-  int materialId;
-  glm::vec3 translation;
-  glm::vec3 rotation;
-  glm::vec3 scale;
-  glm::mat4 transform;
-  glm::mat4 inverseTransform;
-  glm::mat4 invTranspose;
 };
 
 struct Camera {
@@ -53,10 +33,14 @@ struct Camera {
   float tanFovY;
 };
 
+struct PrevBSDFSampleInfo {
+  float BSDFPdf;
+  bool deltaSample;
+};
+
 struct RenderState {
   Camera camera;
   unsigned int iterations;
-  int traceDepth;
   std::vector<glm::vec3> image;
   std::string imageName;
 };
@@ -68,13 +52,11 @@ struct PathSegment {
   Ray ray;
   glm::vec3 throughput;
   glm::vec3 radiance;
-  float BSDFPdf;
-  bool deltaSample;
+  PrevBSDFSampleInfo prev;
   int pixelIndex;
   int remainingBounces;
 };
 
-struct Material;
 struct Intersection {
   __device__ Intersection() {}
 
@@ -87,6 +69,7 @@ struct Intersection {
     norm = rhs.norm;
     uv = rhs.uv;
     wo = rhs.wo;
+    prev = rhs.prev;
   }
   int primId;
   int matId;
@@ -99,4 +82,6 @@ struct Intersection {
     glm::vec3 wo;
     glm::vec3 prevPos;
   };
+
+  PrevBSDFSampleInfo prev;
 };

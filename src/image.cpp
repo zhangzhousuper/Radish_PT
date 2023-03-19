@@ -1,8 +1,10 @@
 #include <iostream>
-#include <stb_image_write.h>
-#include <std_image.h>
-#include <stdexcept>
+
 #include <string>
+
+#include <stb_image.h>
+#include <stb_image_write.h>
+
 
 #include "image.h"
 

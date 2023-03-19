@@ -11,7 +11,6 @@ static bool middleMousePressed = false;
 static double lastX;
 static double lastY;
 
-static bool camchanged = true;
 static float dtheta = 0, dphi = 0;
 static glm::vec3 cammove;
 
@@ -186,7 +185,7 @@ void saveImage() {
 }
 
 void runCuda() {
-  if (camchanged) {
+  if (State::camChanged) {
     iteration = 0;
     Camera &cam = renderState->camera;
     cameraPosition.x = zoom * sin(phi) * sin(theta);
@@ -203,7 +202,7 @@ void runCuda() {
     cam.position = cameraPosition;
     cameraPosition += cam.lookAt;
     cam.position = cameraPosition;
-    camchanged = false;
+    State::camChanged = false;
   }
 
   // Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -236,6 +235,8 @@ void runCuda() {
 
 void keyCallback(GLFWwindow *window, int key, int scancode, int action,
                  int mods) {
+  Camera &cam = renderState->camera;
+
   if (action == GLFW_PRESS) {
     switch (key) {
     case GLFW_KEY_ESCAPE:
@@ -248,14 +249,25 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action,
     case GLFW_KEY_T:
       Settings::toneMapping = (Settings::toneMapping + 1) % 3;
       break;
+    case GLFW_KEY_LEFT_SHIFT:
+      cam.position += glm::vec3(0.f, -.1f, 0.f);
+      break;
     case GLFW_KEY_SPACE:
-      camchanged = true;
+      cam.position += glm::vec3(0.f, .1f, 0.f);
+      break;
+    case GLFW_KEY_R:
       renderState = &scene->state;
-      Camera &cam = renderState->camera;
       cam.lookAt = ogLookAt;
+      State::camChanged = true;
       break;
     }
   }
+}
+
+void mouseScrollCallback(GLFWwindow *window, double xoffset, double yoffset) {
+  zoom -= yoffset;
+  zoom = std::fmax(0.1f, zoom);
+  State::camChanged = true;
 }
 
 void mouseButtonCallback(GLFWwindow *window, int button, int action, int mods) {
@@ -270,6 +282,8 @@ void mouseButtonCallback(GLFWwindow *window, int button, int action, int mods) {
 }
 
 void mousePositionCallback(GLFWwindow *window, double xpos, double ypos) {
+  Camera &cam = renderState->camera;
+
   if (xpos == lastX || ypos == lastY)
     return; // otherwise, clicking back into window causes re-start
   if (leftMousePressed) {
@@ -277,14 +291,14 @@ void mousePositionCallback(GLFWwindow *window, double xpos, double ypos) {
     phi -= (xpos - lastX) / width;
     theta -= (ypos - lastY) / height;
     theta = std::fmax(0.001f, std::fmin(theta, PI));
-    camchanged = true;
+    State::camChanged = true;
   } else if (rightMousePressed) {
-    zoom += (ypos - lastY) / height;
-    zoom = std::fmax(0.1f, zoom);
-    camchanged = true;
+    float dy = (ypos - lastY) / height;
+    cam.position.y += dy;
+    cam.lookAt.y += dy;
+    State::camChanged = true;
   } else if (middleMousePressed) {
     renderState = &scene->state;
-    Camera &cam = renderState->camera;
     glm::vec3 forward = cam.view;
     forward.y = 0.0f;
     forward = glm::normalize(forward);
@@ -294,7 +308,7 @@ void mousePositionCallback(GLFWwindow *window, double xpos, double ypos) {
 
     cam.lookAt -= (float)(xpos - lastX) * right * 0.01f;
     cam.lookAt += (float)(ypos - lastY) * forward * 0.01f;
-    camchanged = true;
+    State::camChanged = true;
   }
   lastX = xpos;
   lastY = ypos;
