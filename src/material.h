@@ -8,8 +8,11 @@
 #include "glm/fwd.hpp"
 #include "mathUtil.h"
 
-#define INVALID_PDF -1.f;
 #define MATERIAL_DIELETRIC_USE_SCHLICK_APPROX false
+
+#define NullTextureId -1
+#define ProceduralTexId -2
+#define INVALID_PDF -1.f
 
 enum BSDFSampleType {
   Diffuse = 1 << 0,
@@ -249,13 +252,13 @@ struct Material {
       sample.type = Invalid;
     }
   }
-  int type;
-  glm::vec3 baseColor;
-  float metallic;
-  float roughness;
-  float ior;
-  float emittance;
+  int type = Type::Lambertian;
+  glm::vec3 baseColor = glm::vec3(.7f);
 
-  int baseColorMapId;
-  int normalMapId;
+  float metallic = 0.f;
+  float roughness = 1.f;
+  float ior = 1.5f;
+  float emittance = 0.f;
+
+  int baseColorMapId = NullTextureId;
 };

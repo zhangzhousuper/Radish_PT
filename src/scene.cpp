@@ -40,7 +40,7 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
   std::cout << "\t\t[Model loading " << filename << " ...]" << std::endl;
   if (!tinyobj::LoadObj(&attrib, &shapes, nullptr, &warn, &err,
                         filename.c_str())) {
-    std::cout << "\t\t\t[Fail Error msg [" << err << "]" << std::endl;
+    std::cout << "\t\t\t[Fail Error msg " << err << "]" << std::endl;
     return nullptr;
   }
   bool hasTexcoord = !attrib.texcoords.empty();

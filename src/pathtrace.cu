@@ -77,6 +77,9 @@ static thrust::device_ptr<Intersection> devIntersectionsThr;
 static thrust::device_ptr<int> devIntersecMatKeysThr;
 static thrust::device_ptr<int> devSegmentMatKeysThr;
 
+static glm::vec3 *devGBufferPos = nullptr;
+static glm::vec3 *devGBufferNorm = nullptr;
+
 void InitDataContainer(GuiDataContainer *imGuiData) { guiData = imGuiData; }
 
 void pathTraceInit(Scene *scene) {
@@ -170,7 +173,30 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth,
   }
 }
 
-// TODO:
+__global__ void previewGBufer(int iter, DevScene *scene, Camera cam,
+                              glm::vec3 *image, int width, int height,
+                              int kind) {
+  int x = blockDim.x * blockIdx.x + threadIdx.x;
+  int y = blockDim.y * blockIdx.y + threadIdx.y;
+  if (x >= width || y >= height)
+    return;
+
+  int index = x + (y * width);
+  thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+
+  Ray ray = sampleCamera(cam, x, y, sample4D(rng));
+  Intersection intersec;
+  scene->intersect(ray, intersec);
+
+  if (kind == 0) {
+    image[index] += intersec.pos;
+  } else if (kind == 1) {
+    image[index] += (intersec.norm + 1.0f) * 0.5f;
+  } else if (kind == 2) {
+    image[index] += glm::vec3(intersec.uv, 1.f);
+  }
+}
+
 // computeIntersections handles generating ray intersections ONLY.
 // Generating new rays is handled in your shader(s).
 // Feel free to modify the code below.
@@ -248,7 +274,8 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
   thrust::default_random_engine rng =
       makeSeededRandomEngine(iter, idx, 4 + depth * SamplesConsumedOneIter);
 
-  Material material = scene->dev_materials[intersec.matId];
+  Material material = scene->getMaterialWithTexture(intersec);
+
   glm::vec3 accRadiance(0.f);
 
   if (material.type == Material::Type::Light) {
@@ -353,6 +380,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
   }
 
   Material material = scene->dev_materials[intersec.matId];
+
   if (material.type == Material::Type::Light) {
     accRadiance += material.baseColor * material.emittance;
     goto WriteRadiance;
@@ -407,7 +435,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
       break;
     }
 
-    material = scene->dev_materials[intersec.matId];
+    material = scene->getMaterialWithTexture(intersec);
 
     if (material.type == Material::Type::Light) {
 #if SCENE_LIGHT_SINGLE_SIDED
@@ -569,10 +597,14 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
       singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(
           iter, Settings::traceDepth, hst_scene->devScene, cam, dev_image,
           cam.resolution.x, cam.resolution.y);
-    } else {
+    } else if (Settings::tracer == Tracer::BVHVisualize) {
       BVHVisualize<<<singlePTBlockNum, singlePTBlockSize>>>(
           iter, hst_scene->devScene, cam, dev_image, cam.resolution.x,
           cam.resolution.y);
+    } else {
+      previewGBufer<<<singlePTBlockNum, singlePTBlockSize>>>(
+          iter, hst_scene->devScene, cam, dev_image, cam.resolution.x,
+          cam.resolution.y, Settings::GBufferPreviewOpt);
     }
 
     if (guiData != nullptr) {

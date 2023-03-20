@@ -63,7 +63,7 @@ public:
 
   static void clear();
 
-private:
+public:
   static std::map<std::string, MeshData *> meshDataPool;
   static std::map<std::string, Image *> texturePool;
 };
@@ -72,6 +72,15 @@ class Scene;
 struct DevScene {
   void create(const Scene &scene);
   void destroy();
+
+  __device__ Material getMaterialWithTexture(const Intersection &intersec) {
+    Material mat = dev_materials[intersec.matId];
+    if (mat.baseColorMapId > NullTextureId) {
+      mat.baseColor =
+          dev_textureObjs[mat.baseColorMapId].linearSample(intersec.uv);
+    }
+    return mat;
+  }
 
   __device__ int getMTBVHId(glm::vec3 dir) {
     glm::vec3 absDir = glm::abs(dir);
