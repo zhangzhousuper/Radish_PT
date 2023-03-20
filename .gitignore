@@ -8,6 +8,8 @@
 
 imgui.ini
 
+*.png
+
 bin/
 
 build/
