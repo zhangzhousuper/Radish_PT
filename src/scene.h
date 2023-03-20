@@ -6,6 +6,7 @@
 #include <sstream>
 #include <vector>
 
+#include "glm/geometric.hpp"
 #include "tiny_obj_loader.h"
 
 #include "glm/glm.hpp"
@@ -73,11 +74,19 @@ struct DevScene {
   void create(const Scene &scene);
   void destroy();
 
-  __device__ Material getMaterialWithTexture(const Intersection &intersec) {
+  __device__ Material getTexturedMaterialAndSurface(Intersection &intersec) {
     Material mat = dev_materials[intersec.matId];
     if (mat.baseColorMapId > NullTextureId) {
       mat.baseColor =
           dev_textureObjs[mat.baseColorMapId].linearSample(intersec.uv);
+    }
+
+    if (mat.normalMapId > NullTextureId) {
+      glm::vec3 mapped =
+          dev_textureObjs[mat.normalMapId].linearSample(intersec.uv);
+      glm::vec3 localNorm =
+          glm::normalize(glm::vec3(mapped.x, mapped.y, mapped.z) * 1.f - 0.5f);
+      intersec.norm = Math::localToWorld(intersec.norm, localNorm);
     }
     return mat;
   }
@@ -332,9 +341,7 @@ struct DevScene {
         node = nodes[node].nextNodeIfMiss;
       }
     }
-    if (closestPrimId == 0) {
-      maxDepth = 100.f;
-    }
+
     intersec.primId = maxDepth;
   }
   /**
@@ -414,13 +421,18 @@ private:
   void loadMaterial(const string &materialId);
   void loadCamera();
 
+  int addMaterial(const Material &material);
+  int addTexture(const std::string &filename);
+
 public:
   RenderState state;
 
-  std::vector<Material> materials;
-  std::vector<Image *> textures;
   std::vector<ModelInstance> modelInstances;
 
+  std::vector<Image *> textures;
+  std::map<Image *, int> textureMap;
+
+  std::vector<Material> materials;
   std::map<std::string, int> materialMap;
 
   std::vector<int> materialIds;

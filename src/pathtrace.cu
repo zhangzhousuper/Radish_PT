@@ -173,9 +173,9 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth,
   }
 }
 
-__global__ void previewGBufer(int iter, DevScene *scene, Camera cam,
-                              glm::vec3 *image, int width, int height,
-                              int kind) {
+__global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
+                               glm::vec3 *image, int width, int height,
+                               int kind) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
   if (x >= width || y >= height)
@@ -191,6 +191,9 @@ __global__ void previewGBufer(int iter, DevScene *scene, Camera cam,
   if (kind == 0) {
     image[index] += intersec.pos;
   } else if (kind == 1) {
+    if (intersec.primId != NullPrimitive) {
+      Material m = scene->getTexturedMaterialAndSurface(intersec);
+    }
     image[index] += (intersec.norm + 1.0f) * 0.5f;
   } else if (kind == 2) {
     image[index] += glm::vec3(intersec.uv, 1.f);
@@ -274,14 +277,14 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
   thrust::default_random_engine rng =
       makeSeededRandomEngine(iter, idx, 4 + depth * SamplesConsumedOneIter);
 
-  Material material = scene->getMaterialWithTexture(intersec);
+  Material material = scene->getTexturedMaterialAndSurface(intersec);
 
   glm::vec3 accRadiance(0.f);
 
   if (material.type == Material::Type::Light) {
     PrevBSDFSampleInfo prev = sortMaterial ? intersec.prev : segment.prev;
 
-    glm::vec3 radiance = material.baseColor * material.emittance;
+    glm::vec3 radiance = material.baseColor;
     if (depth == 0) {
       accRadiance += radiance;
     } else if (prev.deltaSample) {
@@ -382,7 +385,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
   Material material = scene->dev_materials[intersec.matId];
 
   if (material.type == Material::Type::Light) {
-    accRadiance += material.baseColor * material.emittance;
+    accRadiance += material.baseColor;
     goto WriteRadiance;
   }
 
@@ -435,7 +438,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
       break;
     }
 
-    material = scene->getMaterialWithTexture(intersec);
+    material = scene->getTexturedMaterialAndSurface(intersec);
 
     if (material.type == Material::Type::Light) {
 #if SCENE_LIGHT_SINGLE_SIDED
@@ -444,7 +447,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
       }
 #endif
 
-      glm::vec3 radiance = material.baseColor * material.emittance;
+      glm::vec3 radiance = material.baseColor;
       if (deltaSample) {
         accRadiance += throughput * radiance;
       } else {
@@ -484,7 +487,7 @@ __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
     size >> 1;
   }
 
-  image[index] = glm::vec3(float(intersec.primId) / logDepth * .1f);
+  image[index] = glm::vec3(float(intersec.primId) / logDepth * .06f);
 }
 
 struct CompactTerminatedPaths {
@@ -602,7 +605,7 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
           iter, hst_scene->devScene, cam, dev_image, cam.resolution.x,
           cam.resolution.y);
     } else {
-      previewGBufer<<<singlePTBlockNum, singlePTBlockSize>>>(
+      previewGBuffer<<<singlePTBlockNum, singlePTBlockSize>>>(
           iter, hst_scene->devScene, cam, dev_image, cam.resolution.x,
           cam.resolution.y, Settings::GBufferPreviewOpt);
     }

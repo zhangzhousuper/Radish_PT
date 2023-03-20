@@ -261,4 +261,5 @@ struct Material {
   float emittance = 0.f;
 
   int baseColorMapId = NullTextureId;
+  int normalMapId = NullTextureId;
 };

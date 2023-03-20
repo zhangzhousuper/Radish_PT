@@ -5,11 +5,14 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-
 #include "image.h"
 
 Image::Image(const std::string &filename) {
   int channels;
+
+  // The textures should be in the linear space
+  stbi_ldr_to_hdr_gamma(1.f);
+
   float *data = stbi_loadf(filename.c_str(), &mWidth, &mHeight, &channels, 3);
 
   if (!data) {

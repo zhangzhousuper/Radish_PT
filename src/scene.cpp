@@ -165,7 +165,7 @@ void Scene::buildDevData() {
   int primId = 0;
   for (const auto &instance : modelInstances) {
     const auto &material = materials[instance.materialId];
-    glm::vec3 radianceUnitArea = material.baseColor * material.emittance;
+    glm::vec3 radianceUnitArea = material.baseColor;
     float powerUnitArea = Math::luminance(radianceUnitArea);
 
     for (size_t i = 0; i < instance.meshData->vertices.size(); i++) {
@@ -345,6 +345,24 @@ void Scene::loadCamera() {
   cout << "Loaded camera!" << endl;
 }
 
+int Scene::addMaterial(const Material &material) {
+  materials.push_back(material);
+  return materials.size() - 1;
+}
+
+int Scene::addTexture(const std::string &filename) {
+  auto texture = Resource::loadTexture(filename);
+  auto find = textureMap.find(texture);
+  if (find != textureMap.end()) {
+    return find->second;
+  } else {
+    int size = textureMap.size();
+    textureMap[texture] = size;
+    textures.push_back(texture);
+    return size;
+  }
+}
+
 void Scene::loadMaterial(const std::string &materialId) {
   std::cout << "Loading Material ..." << std::endl;
   Material material;
@@ -356,17 +374,27 @@ void Scene::loadMaterial(const std::string &materialId) {
     if (tokens[0] == "Type") {
       material.type = MaterialTypeTokenMap[tokens[1]];
     } else if (tokens[0] == "BaseColor") {
-      glm::vec3 baseColor(std::stof(tokens[1]), std::stof(tokens[2]),
-                          std::stof(tokens[3]));
-      material.baseColor = baseColor;
+      if (tokens.size() > 2) {
+        glm::vec3 baseColor(std::stof(tokens[1]), std::stof(tokens[2]),
+                            std::stof(tokens[3]));
+        material.baseColor = baseColor;
+      } else {
+        material.baseColorMapId = addTexture(tokens[1]);
+        std::cout << "\t\t[BaseColor use texture " << tokens[1] << "]"
+                  << std::endl;
+      }
     } else if (tokens[0] == "Metallic") {
       material.metallic = std::stof(tokens[1]);
     } else if (tokens[0] == "Roughness") {
       material.roughness = std::stof(tokens[1]);
     } else if (tokens[0] == "Ior") {
       material.ior = std::stof(tokens[1]);
-    } else if (tokens[0] == "Emittance") {
-      material.emittance = std::stof(tokens[1]);
+    } else if (tokens[0] == "NormalMap") {
+      if (tokens[1] == "Null") {
+        material.normalMapId = addTexture(tokens[1]);
+        std::cout << "\t\t[NormalMap use texture " << tokens[1] << "]"
+                  << std::endl;
+      }
     }
   }
   materialMap[materialId] = materials.size();
