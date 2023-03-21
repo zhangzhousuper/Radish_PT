@@ -397,6 +397,7 @@ void Scene::loadMaterial(const std::string &materialId) {
         material.baseColorMapId = addTexture(tokens[1]);
         std::cout << "\t\t[BaseColor use texture " << tokens[1] << "]"
                   << std::endl;
+        std::cout << "baseColorMapId: " << material.baseColorMapId << std::endl;
       }
     } else if (tokens[0] == "Metallic") {
       material.metallic = std::stof(tokens[1]);

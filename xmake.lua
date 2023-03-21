@@ -40,4 +40,5 @@ target("cuda_pt")
 
     set_rundir("$(projectdir)/scenes")
     set_runargs("cornell.txt")
+
 target_end()

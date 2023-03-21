@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdio.h>
 #include <vector>
 
 #include "glm/geometric.hpp"
@@ -203,9 +204,9 @@ struct DevScene {
     }
 
     if (closestPrimId != NullPrimitive) {
+      getIntersecGeomInfo(closestPrimId, closestBary, intersec);
       intersec.primId = closestPrimId;
       intersec.matId = devMaterialIds[closestPrimId];
-      getIntersecGeomInfo(closestPrimId, closestBary, intersec);
     } else {
       intersec.primId = NullPrimitive;
     }
