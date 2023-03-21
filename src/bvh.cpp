@@ -7,6 +7,8 @@
  * registers that were used in stack-based traversal. It's simple and efficient.
  * https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf
  */
+
+// credits to HummaWhite
 int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
                       std::vector<AABB> &boundingBoxes,
                       std::vector<std::vector<MTBVHNode>> &BVHNodes) {
@@ -35,6 +37,7 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
   int depth = 0;
   while (stackTop) {
     depth = std::max(depth, stackTop);
+
     stackTop--;
     int offset = stack[stackTop].offset;
     int start = stack[stackTop].start;
@@ -51,10 +54,6 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
       centerBound = centerBound(primInfo[i].center);
     }
     boundingBoxes[offset] = nodeBound;
-
-    /*std::cout << std::setw(4) << nodeInfo[offset].primIdOrSize << " " <<
-       offset << " " << start << " " << end << " " << nodeBound.toString() <<
-       "\n";*/
 
     if (isLeaf) {
       continue;
@@ -78,7 +77,6 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
 
     float dimMin = centerBound.pMin[splitAxis];
     float dimMax = centerBound.pMax[splitAxis];
-
     for (int i = start; i <= end; i++) {
       int bid = glm::clamp(int((primInfo[i].center[splitAxis] - dimMin) /
                                (dimMax - dimMin) * NumBuckets),
@@ -144,17 +142,6 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
   }
   std::vector<int> stack(BVHSize);
 
-  /*
-  for (auto& info : nodeInfo) {
-      std::cout << (info.isLeaf ? info.primIdOrSize : 0) << " ";
-  }
-  std::cout << "\n";
-  for (auto& info : nodeInfo) {
-      std::cout << (info.isLeaf ? 0 : info.primIdOrSize) << " ";
-  }
-  std::cout << "\n\n";
-  */
-
   for (int i = 0; i < 6; i++) {
     auto &nodes = BVHNodes[i];
     nodes.resize(BVHSize);
@@ -193,13 +180,4 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
       stack[stackTop++] = left;
     }
   }
-
-  /*for (const auto& nodes : BVHNodes) {
-      for (const auto& node : nodes) {
-          std::cout << std::setw(3) << node.primitiveId << " " <<
-  node.nextNodeIfMiss << " " <<
-              vec3ToString(boundingBoxes[node.boundingBoxId].center()) << "\n";
-      }
-      std::cout << "\n";
-  }*/
 }

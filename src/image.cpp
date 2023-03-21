@@ -15,13 +15,7 @@ Image::Image(const std::string &filename) {
 
   // The textures should be in the linear space
   stbi_ldr_to_hdr_gamma(1.f);
-  std::cout << "before stbi_loadf" << std::endl;
-  std::cout << "filename: " << filename.c_str() << std::endl;
-  std::cout << "mWidth: " << mWidth << std::endl;
-  std::cout << "mHeight: " << mHeight << std::endl;
-  std::cout << "channels: " << channels << std::endl;
   float *data = stbi_loadf(filename.c_str(), &mWidth, &mHeight, &channels, 3);
-  std::cout << "data: " << data << std::endl;
   if (data) {
     std::cout << "Loaded " << filename << " (" << mWidth << "x" << mHeight
               << "x" << channels << ")" << std::endl;

@@ -107,20 +107,19 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
     if (find != texturePool.end()) {
       return find->second;
     }
-    std::cout << "before new image" << std::endl;
     auto texture = new Image(filename);
-    std::cout << "after new image" << std::endl;
     texturePool[filename] = texture;
     return texture;
   }
 
   void Resource::clear() {
-    for (auto &pair : meshDataPool) {
-      delete pair.second;
+    for (auto i : meshDataPool) {
+      delete i.second;
     }
     meshDataPool.clear();
-    for (auto &pair : texturePool) {
-      delete pair.second;
+
+    for (auto i : texturePool) {
+      delete i.second;
     }
     texturePool.clear();
   }
@@ -139,7 +138,7 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
       std::string line;
       utilityCore::safeGetline(fp_in, line);
       if (!line.empty()) {
-        vector<string> tokens = utilityCore::tokenizeString(line);
+        std::vector<std::string> tokens = utilityCore::tokenizeString(line);
         if (tokens[0] == "Material") {
           loadMaterial(tokens[1]);
           cout << " " << endl;
@@ -237,7 +236,6 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
     std::string filename = line;
     std::cout << "filename: " << filename << std::endl;
     instance.meshData = Resource::loadModelMeshData(filename);
-
     if (!instance.meshData) {
       std::cout << "\t\t[Fail to load, skipped]" << std::endl;
       while (!line.empty() && fp_in.good()) {
@@ -396,8 +394,6 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
                               std::stof(tokens[3]));
           material.baseColor = baseColor;
         } else {
-          std::cout << "\t\t[Before addTexture " << tokens[1] << "]"
-                    << std::endl;
           material.baseColorMapId = addTexture(tokens[1]);
           std::cout << "\t\t[BaseColor use texture " << tokens[1] << "]"
                     << std::endl;
