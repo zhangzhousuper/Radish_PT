@@ -1,37 +1,37 @@
 #include "bvh.h"
-#include <vcruntime_string.h>
 
 /**
  * MTBVH builder
- https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf
+ * What is MTBVH? It's a variant of Bounding Volume Hierarchy invented by
+ * Toshiya Hachisuka. MTBVH enables stackless BVH traversal on GPU, saving many
+ * registers that were used in stack-based traversal. It's simple and efficient.
+ * https://cs.uwaterloo.ca/~thachisu/tdf2015.pdf
  */
-
 int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
                       std::vector<AABB> &boundingBoxes,
                       std::vector<std::vector<MTBVHNode>> &BVHNodes) {
   std::cout << "[BVH building...]" << std::endl;
-  int numPrimitives = vertices.size() / 3;
-  int BVHSize = numPrimitives * 2 - 1;
+  int numPrims = vertices.size() / 3;
+  int BVHSize = numPrims * 2 - 1;
 
-  std::vector<PrimInfo> primInfo(numPrimitives);
+  std::vector<PrimInfo> primInfo(numPrims);
   std::vector<NodeInfo> nodeInfo(BVHSize);
   boundingBoxes.resize(BVHSize);
 
-  for (int i = 0; i < numPrimitives; i++) {
+  for (int i = 0; i < numPrims; i++) {
     primInfo[i].primId = i;
     primInfo[i].bound =
-        AABB(vertices[i * 3], vertices[i * 3 + 1], vertices[i * 3 + 2]);
+        AABB(vertices[i * 3 + 0], vertices[i * 3 + 1], vertices[i * 3 + 2]);
     primInfo[i].center = primInfo[i].bound.center();
   }
 
-  // array stack for faster
+  // Use array stack just for faster
   std::vector<BuildInfo> stack(BVHSize);
   int stackTop = 0;
-  stack[stackTop++] = {0, 0, numPrimitives - 1};
+  stack[stackTop++] = {0, 0, numPrims - 1};
 
   const int NumBuckets = 16;
-
-  // using non-recursive approach to build BVH directly flatteded
+  // Using non-recursive approach to build BVH data directly flattened
   int depth = 0;
   while (stackTop) {
     depth = std::max(depth, stackTop);
@@ -40,9 +40,9 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
     int start = stack[stackTop].start;
     int end = stack[stackTop].end;
 
-    int numSubPrimitives = end - start + 1;
-    int nodeSize = numSubPrimitives * 2 - 1;
-    bool isLeaf = numSubPrimitives == 1;
+    int numSubPrims = end - start + 1;
+    int nodeSize = numSubPrims * 2 - 1;
+    bool isLeaf = nodeSize == 1;
     nodeInfo[offset] = {isLeaf, isLeaf ? primInfo[start].primId : nodeSize};
 
     AABB nodeBound, centerBound;
@@ -52,8 +52,9 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
     }
     boundingBoxes[offset] = nodeBound;
 
-    std::cout << std::setw(10) << offset << " " << start << " " << end << " "
-              << nodeBound.toString() << "\n";
+    /*std::cout << std::setw(4) << nodeInfo[offset].primIdOrSize << " " <<
+       offset << " " << start << " " << end << " " << nodeBound.toString() <<
+       "\n";*/
 
     if (isLeaf) {
       continue;
@@ -86,50 +87,48 @@ int BVHBuilder::build(const std::vector<glm::vec3> &vertices,
       bucketCounts[bid]++;
     }
 
-    AABB leftBounds[NumBuckets];
-    AABB rightBounds[NumBuckets];
+    AABB lBounds[NumBuckets];
+    AABB rBounds[NumBuckets];
     int countPrefix[NumBuckets];
 
-    leftBounds[0] = bucketBounds[0];
-    rightBounds[NumBuckets - 1] = bucketBounds[NumBuckets - 1];
+    lBounds[0] = bucketBounds[0];
+    rBounds[NumBuckets - 1] = bucketBounds[NumBuckets - 1];
     countPrefix[0] = bucketCounts[0];
     for (int i = 1, j = NumBuckets - 2; i < NumBuckets; i++, j--) {
-      leftBounds[i] = leftBounds[i](bucketBounds[i - 1]);
-      rightBounds[j] = rightBounds[j](bucketBounds[j + 1]);
+      lBounds[i] = lBounds[i](bucketBounds[i - 1]);
+      rBounds[j] = rBounds[j](bucketBounds[j + 1]);
       countPrefix[i] = countPrefix[i - 1] + bucketCounts[i];
     }
 
     float minSAH = FLT_MAX;
     int divBucket = 0;
     for (int i = 0; i < NumBuckets - 1; i++) {
-      float SAH = glm::mix(leftBounds[i].surfaceArea(),
-                           rightBounds[i + 1].surfaceArea(),
-                           countPrefix[i] / float(numSubPrimitives));
+      float SAH =
+          glm::mix(lBounds[i].surfaceArea(), rBounds[i + 1].surfaceArea(),
+                   float(countPrefix[i]) / numSubPrims);
       if (SAH < minSAH) {
         minSAH = SAH;
         divBucket = i;
       }
     }
 
-    std::vector<PrimInfo> temp(numSubPrimitives);
+    std::vector<PrimInfo> temp(numSubPrims);
     memcpy(temp.data(), primInfo.data() + start,
-           sizeof(PrimInfo) * numSubPrimitives);
+           numSubPrims * sizeof(PrimInfo));
 
     int divPrim = start, divEnd = end;
-    for (int i = 0; i < numSubPrimitives; i++) {
+    for (int i = 0; i < numSubPrims; i++) {
       int bid = glm::clamp(int((temp[i].center[splitAxis] - dimMin) /
                                (dimMax - dimMin) * NumBuckets),
                            0, NumBuckets - 1);
       (bid <= divBucket ? primInfo[divPrim++] : primInfo[divEnd--]) = temp[i];
     }
+    divPrim = glm::clamp(divPrim - 1, start, end - 1);
+    int lSize = 2 * (divPrim - start + 1) - 1;
 
-    divPrim = glm::clamp(divPrim, start, end - 1);
-    int leftSize = 2 * (divPrim - start + 1) - 1;
-
-    stack[stackTop++] = {offset + 1 + leftSize, divPrim + 1, end};
+    stack[stackTop++] = {offset + 1 + lSize, divPrim + 1, end};
     stack[stackTop++] = {offset + 1, start, divPrim};
   }
-
   std::cout << "\t[Size = " << BVHSize << ", depth = " << depth << "]"
             << std::endl;
   buildMTBVH(boundingBoxes, nodeInfo, BVHSize, BVHNodes);
@@ -143,8 +142,18 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
   for (auto &node : BVHNodes) {
     node.resize(BVHSize);
   }
-
   std::vector<int> stack(BVHSize);
+
+  /*
+  for (auto& info : nodeInfo) {
+      std::cout << (info.isLeaf ? info.primIdOrSize : 0) << " ";
+  }
+  std::cout << "\n";
+  for (auto& info : nodeInfo) {
+      std::cout << (info.isLeaf ? 0 : info.primIdOrSize) << " ";
+  }
+  std::cout << "\n\n";
+  */
 
   for (int i = 0; i < 6; i++) {
     auto &nodes = BVHNodes[i];
@@ -153,7 +162,6 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
     int stackTop = 0;
     stack[stackTop++] = 0;
     int nodeIdNew = 0;
-
     while (stackTop) {
       int nodeIdOrig = stack[--stackTop];
       bool isLeaf = nodeInfo[nodeIdOrig].isLeaf;
@@ -161,13 +169,12 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
 
       nodes[nodeIdNew] = {isLeaf ? nodeInfo[nodeIdOrig].primIdOrSize
                                  : NullPrimitive,
-                          nodeIdOrig, nodeSize + nodeIdNew};
+                          nodeIdOrig, nodeIdNew + nodeSize};
       nodeIdNew++;
 
       if (isLeaf) {
         continue;
       }
-
       bool isLeftLeaf = nodeInfo[nodeIdOrig + 1].isLeaf;
       int leftSize = isLeftLeaf ? 1 : nodeInfo[nodeIdOrig + 1].primIdOrSize;
 
@@ -175,10 +182,9 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
       int right = nodeIdOrig + 1 + leftSize;
 
       int dim = i / 2;
-      bool lesser = dim & 1;
-
-      if (boundingBoxes[left].center()[dim] <
-              boundingBoxes[right].center()[dim] ^
+      bool lesser = i & 1;
+      if ((boundingBoxes[left].center()[dim] <
+           boundingBoxes[right].center()[dim]) ^
           lesser) {
         std::swap(left, right);
       }
@@ -187,14 +193,13 @@ void BVHBuilder::buildMTBVH(const std::vector<AABB> &boundingBoxes,
       stack[stackTop++] = left;
     }
   }
-  for (const auto &nodes : BVHNodes) {
-    for (const auto &node : nodes) {
-      std::cout << std::setw(3) << node.primitiveId << " ";
-    }
-    std::cout << "\n";
-    for (const auto &node : nodes) {
-      std::cout << std::setw(3) << node.nextNodeIfMiss << " ";
-    }
-    std::cout << "\n\n";
-  }
+
+  /*for (const auto& nodes : BVHNodes) {
+      for (const auto& node : nodes) {
+          std::cout << std::setw(3) << node.primitiveId << " " <<
+  node.nextNodeIfMiss << " " <<
+              vec3ToString(boundingBoxes[node.boundingBoxId].center()) << "\n";
+      }
+      std::cout << "\n";
+  }*/
 }

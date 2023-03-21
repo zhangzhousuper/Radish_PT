@@ -101,7 +101,7 @@ template <typename T> struct DiscreteSampler {
   int sample(float r1, float r2) {
     int passId = int(float(binomDistribs.size()) * r1);
     DistribT distrib = binomDistribs[passId];
-    return (r2 < distrib.prob ? passId : distrib.failId);
+    return (r2 < distrib.prob) ? passId : distrib.failId;
   }
 
   std::vector<DistribT> binomDistribs;
@@ -126,10 +126,10 @@ template <typename T> struct DevDiscreteSampler1D {
   __device__ int sample(float r1, float r2) {
     int passId = int(float(length) * r1);
     DistribT distrib = devBinomDistribs[passId];
-    return (r2 < distrib.prob ? passId : distrib.failId);
+    return (r2 < distrib.prob) ? passId : distrib.failId;
   }
 
-  DistribT *devBinomDistribs;
+  DistribT *devBinomDistribs = nullptr;
   int length = 0;
 };
 

@@ -31,6 +31,11 @@ struct BSDFSample {
   uint32_t type;
 };
 
+__device__ inline float fresnelSchlick(float lDotH, float ior) {
+  float f0 = (1.f - ior) / (1.f + ior);
+  return glm::mix(f0, 1.f, Math::pow5(1.f - lDotH));
+}
+
 __device__ inline glm::vec3 fresnelSchlick(float lDotH, glm::vec3 f0) {
   return glm::mix(f0, glm::vec3(1.f), Math::pow5(1.f - lDotH));
 }
@@ -52,21 +57,24 @@ __device__ static float fresnel(float cosIn, float ior) {
   float cosTr = glm::sqrt(1.f - sinTr * sinTr);
   float rPar = (cosIn - ior * cosTr) / (cosIn + ior * cosTr);
   float rPer = (ior * cosIn - cosTr) / (ior * cosIn + cosTr);
-  return (rPar * rPar + rPer * rPer) / 2.f;
+  return (rPar * rPar + rPer * rPer) * .5f;
 #endif
 }
 
 // cosTheta is the cosine of the angle between the normal and the direction
 // alpha is the roughness
 __device__ static float schlickG(float cosTheta, float alpha) {
-  float alpha2 = alpha * alpha;
-  return cosTheta / (cosTheta * (1.f - alpha2) + alpha2);
+  float a = alpha * .5f;
+  return cosTheta / (cosTheta * (1.f - a) + a);
 }
 
 __device__ inline float smithG(float cosWo, float cosWi, float alpha) {
   return schlickG(glm::abs(cosWo), alpha) * schlickG(glm::abs(cosWi), alpha);
 }
 __device__ static float ggxDistribution(float cosTheta, float alpha) {
+  if (cosTheta < 1e-6f) {
+    return 0.f;
+  }
   float alpha2 = alpha * alpha;
   float nom = alpha2;
   float denom = (cosTheta * cosTheta) * (alpha2 - 1.f) + 1.f;
@@ -96,7 +104,7 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha,
   glm::mat3 transMat = Math::localRefMatrix(n);
   glm::mat3 transInv = glm::inverse(transMat);
 
-  glm::vec3 vh = glm::normalize(transInv * wo) * glm::vec3(alpha, alpha, 1.f);
+  glm::vec3 vh = glm::normalize((transInv * wo) * glm::vec3(alpha, alpha, 1.f));
 
   float lenSq = vh.x * vh.x + vh.y * vh.y;
   glm::vec3 t = lenSq > 0.f ? glm::vec3(-vh.y, vh.x, 0.f) / sqrt(lenSq)
@@ -108,13 +116,13 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha,
   p.y = (1.f - s) * glm::sqrt(1.f - p.x * p.x) + s * p.y;
 
   glm::vec3 h =
-      p.x + b * p.y + vh * glm::sqrt(glm::max(0.f, 1.f - glm::dot(p, p)));
+      t * p.x + b * p.y + vh * glm::sqrt(glm::max(0.f, 1.f - glm::dot(p, p)));
   h = glm::normalize(glm::vec3(h.x * alpha, h.y * alpha, glm::max(0.f, h.z)));
   return transMat * h;
 }
 
 struct Material {
-  enum Type { Lambertian, Metallic, Dielectric, Disney, Light };
+  enum Type { Lambertian, MetallicWorkflow, Dielectric, Disney, Light };
 
   __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     return baseColor * INV_PI;
@@ -124,8 +132,8 @@ struct Material {
     return Math::satDot(n, wi) * INV_PI;
   }
 
-  __device__ glm::vec3 lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec2 r,
-                                        BSDFSample &sample) {
+  __device__ void lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
+                                   BSDFSample &sample) {
     sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
     sample.bsdf = baseColor * INV_PI;
     sample.pdf = Math::satDot(n, sample.dir) * INV_PI;
@@ -139,6 +147,7 @@ struct Material {
   __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     return 0.f;
   }
+
   __device__ void dielectricSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
                                    BSDFSample &sample) {
     float pdfRefl = fresnel(glm::dot(n, wo), ior);
@@ -194,10 +203,10 @@ struct Material {
                                  BSDFSample &sample) {
     float alpha = roughness * roughness;
 
-    if (r.z > (1.f / 2.f - metallic)) {
+    if (r.z > (1.f / (2.f - metallic))) {
       sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
     } else {
-      glm::vec3 h = ggxSample(n, wo, alpha, glm::vec2(r.x, r.y));
+      glm::vec3 h = ggxSample(n, wo, alpha, glm::vec2(r));
       sample.dir = -glm::reflect(wo, h);
     }
 
@@ -212,11 +221,11 @@ struct Material {
 
   __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     switch (type) {
-    case Material::Lambertian:
+    case Material::Type::Lambertian:
       return lambertianBSDF(n, wo, wi);
-    case Material::Type::Metallic:
+    case Material::Type::MetallicWorkflow:
       return metallicBSDF(n, wo, wi);
-    case Material::Dielectric:
+    case Material::Type::Dielectric:
       return dielectricBSDF(n, wo, wi);
     }
 
@@ -225,15 +234,14 @@ struct Material {
 
   __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
     switch (type) {
-    case Material::Lambertian:
+    case Material::Type::Lambertian:
       return lambertianPdf(n, wo, wi);
-    case Material::Type::Metallic:
+    case Material::Type::MetallicWorkflow:
       return metallicPdf(n, wo, wi);
-    case Material::Dielectric:
+    case Material::Type::Dielectric:
       return dielectricPdf(n, wo, wi);
-    default:
-      return 0.f;
     }
+    return 0.f;
   }
 
   __device__ void sample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
@@ -242,7 +250,7 @@ struct Material {
     case Material::Type::Lambertian:
       lambertianSample(n, wo, r, sample);
       break;
-    case Material::Type::Metallic:
+    case Material::Type::MetallicWorkflow:
       metallicSample(n, wo, r, sample);
       break;
     case Material::Type::Dielectric:
@@ -258,7 +266,6 @@ struct Material {
   float metallic = 0.f;
   float roughness = 1.f;
   float ior = 1.5f;
-  float emittance = 0.f;
 
   int baseColorMapId = NullTextureId;
   int normalMapId = NullTextureId;

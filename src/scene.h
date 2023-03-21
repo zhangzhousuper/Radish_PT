@@ -145,7 +145,7 @@ struct DevScene {
       return false;
     }
     glm::vec3 hitPoint =
-        va * bary.x + vb * bary.y + vc * (1.f - bary.x - bary.y);
+        vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
     return true;
   }
 
@@ -156,7 +156,7 @@ struct DevScene {
     glm::vec2 bary;
     float dist;
     bool hit = intersectTriangle(ray, va, vb, vc, bary, dist);
-    return hit && dist < distRange;
+    return (hit && dist < distRange);
   }
 
   __device__ bool intersectPrimDetailed(int primId, Ray ray,
@@ -234,7 +234,7 @@ struct DevScene {
     glm::vec2 closestBary;
     float closestDist = FLT_MAX;
 
-    MTBVHNode *nodes = dev_bvh[getMTBVHId(ray.direction)];
+    MTBVHNode *nodes = dev_bvh[getMTBVHId(-ray.direction)];
     int node = 0;
 
     while (node != BVHSize) {
@@ -266,10 +266,8 @@ struct DevScene {
     if (closestPrimId != NullPrimitive) {
       getIntersecGeomInfo(closestPrimId, closestBary, intersec);
       intersec.matId = dev_materialIds[closestPrimId];
-
-    } else {
-      intersec.primId = closestPrimId;
     }
+    intersec.primId = closestPrimId;
   }
 
   __device__ bool testOcclusion(glm::vec3 x, glm::vec3 y) {
@@ -294,7 +292,8 @@ struct DevScene {
         int primId = nodes[node].primitiveId;
 
         if (primId != NullPrimitive) {
-          return true;
+          if (intersectPrim(primId, ray, dist))
+            return true;
         }
         node++;
       } else {
@@ -305,7 +304,7 @@ struct DevScene {
   }
 
   __device__ void visualizedIntersect(Ray ray, Intersection &intersec) {
-    float cloestDist = FLT_MAX;
+    float closestDist = FLT_MAX;
     int closestPrimId = NullPrimitive;
     glm::vec2 closestBary;
 
@@ -320,17 +319,16 @@ struct DevScene {
 
       // Only intersect a primitive if its bounding box is hit and
       // that box is closer than previous hit record
-
-      if (boundHit && boundDist < cloestDist) {
+      if (boundHit && boundDist < closestDist) {
         int primId = nodes[node].primitiveId;
         if (primId != NullPrimitive) {
           float dist;
           glm::vec2 bary;
           bool hit = intersectPrim(primId, ray, dist, bary);
 
-          if (hit && dist < cloestDist) {
+          if (hit && dist < closestDist) {
             closestPrimId = primId;
-            cloestDist = dist;
+            closestDist = dist;
             closestBary = bary;
             maxDepth += 1.f;
           }
@@ -341,7 +339,6 @@ struct DevScene {
         node = nodes[node].nextNodeIfMiss;
       }
     }
-
     intersec.primId = maxDepth;
   }
   /**
@@ -352,11 +349,11 @@ struct DevScene {
     int passId = int(float(numLightPrims) * r.x);
     BinomialDistribution<float> distrib = devLightDistrib[passId];
     int lightId = (r.y < distrib.prob) ? passId : distrib.failId;
-    int primDId = devLightPrimIds[lightId];
+    int primId = devLightPrimIds[lightId];
 
-    glm::vec3 v0 = dev_vertices[primDId];
-    glm::vec3 v1 = dev_vertices[primDId + 1];
-    glm::vec3 v2 = dev_vertices[primDId + 2];
+    glm::vec3 v0 = dev_vertices[primId];
+    glm::vec3 v1 = dev_vertices[primId + 1];
+    glm::vec3 v2 = dev_vertices[primId + 2];
     glm::vec3 sampled = Math::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
 
 #if BVH_DISABLE
@@ -380,14 +377,12 @@ struct DevScene {
     radiance = devLightUnitRadiance[lightId];
     wi = glm::normalize(posToSampled);
     return Math::pdfAreaToSolidAngle(
-        Math::luminance(radiance) / sumLightPowerInv, pos, sampled, normal);
+        Math::luminance(radiance) * sumLightPowerInv, pos, sampled, normal);
   }
 
   glm::vec3 *dev_vertices = nullptr;
   glm::vec3 *dev_normals = nullptr;
   glm::vec3 *dev_texcoords = nullptr;
-
-  int *devLightPrimIds = nullptr;
 
   AABB *dev_aabb = nullptr;
   MTBVHNode *dev_bvh[6] = {nullptr};
@@ -398,6 +393,7 @@ struct DevScene {
   glm::vec3 *dev_textures = nullptr;
   DevTextureObj *dev_textureObjs = nullptr;
 
+  int *devLightPrimIds = nullptr;
   glm::vec3 *devLightUnitRadiance = nullptr;
   BinomialDistribution<float> *devLightDistrib;
   int numLightPrims;
@@ -417,8 +413,8 @@ public:
 private:
   void createLightSampler();
 
-  void loadModel(const string &objectId);
-  void loadMaterial(const string &materialId);
+  void loadModel(const std::string &objectId);
+  void loadMaterial(const std::string &materialId);
   void loadCamera();
 
   int addMaterial(const Material &material);

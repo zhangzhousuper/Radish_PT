@@ -19,3 +19,5 @@ build/
 txx/
 
 compile_commands.json
+
+cmp/

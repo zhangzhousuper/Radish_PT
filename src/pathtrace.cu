@@ -21,8 +21,6 @@
 #include "sceneStructs.h"
 #include "utilities.h"
 
-#define BVH_DEBUG_VISUALIZATION false
-
 // Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4 *pbo, glm::ivec2 resolution, int iter,
                                glm::vec3 *Image, int toneMapping) {
@@ -33,7 +31,7 @@ __global__ void sendImageToPBO(uchar4 *pbo, glm::ivec2 resolution, int iter,
     int index = x + (y * resolution.x);
 
     // Tonemapping and gamma correction
-    glm::vec3 color = Image[index] / (float)iter;
+    glm::vec3 color = Image[index] / float(iter);
 
     switch (toneMapping) {
     case ToneMapping::Filmic:
@@ -102,7 +100,7 @@ void pathTraceInit(Scene *scene) {
   devIntersectionsThr = thrust::device_ptr<Intersection>(dev_intersections);
 
   cudaMalloc(&devIntersecMatKeys, pixelCount * sizeof(int));
-  cudaMemset(&devSegmentMatKeys, 0, pixelCount * sizeof(int));
+  cudaMalloc(&devSegmentMatKeys, pixelCount * sizeof(int));
   devIntersecMatKeysThr = thrust::device_ptr<int>(devIntersecMatKeys);
   devSegmentMatKeysThr = thrust::device_ptr<int>(devSegmentMatKeys);
 
@@ -117,13 +115,11 @@ void pathTraceFree() {
 
   cudaFree(devIntersecMatKeys);
   cudaFree(devSegmentMatKeys);
-  // TODO: clean up any extra device memory you created
 }
 
 /**
  * Antialiasing and physically based camera (lens effect)
  */
-
 __device__ Ray sampleCamera(const Camera &cam, int x, int y, glm::vec4 r) {
   Ray ray;
   float aspect = float(cam.resolution.x) / float(cam.resolution.y);
@@ -223,7 +219,7 @@ __global__ void computeIntersections(int depth, int num_paths,
   if (intersec.primId != NullPrimitive) {
     if (scene->dev_materials[intersec.matId].type == Material::Type::Light) {
 #if SCENE_LIGHT_SINGLE_SIDED
-      if (glm::dot(intersec.norm, segment.ray.direction) > 0) {
+      if (glm::dot(intersec.norm, segment.ray.direction) < 0.f) {
         intersec.primId = NullPrimitive;
       } else
 #endif
@@ -254,7 +250,7 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
                                        bool sortMaterial) {
   const int SamplesConsumedOneIter = 10;
 
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int idx = blockDim.x * blockIdx.x + threadIdx.x;
 
   if (idx >= num_paths) {
     return;
@@ -382,10 +378,10 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
     goto WriteRadiance;
   }
 
-  Material material = scene->dev_materials[intersec.matId];
+  Material material = scene->getTexturedMaterialAndSurface(intersec);
 
   if (material.type == Material::Type::Light) {
-    accRadiance += material.baseColor;
+    accRadiance = material.baseColor;
     goto WriteRadiance;
   }
 
@@ -484,10 +480,10 @@ __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
   int size = scene->BVHSize;
   while (size) {
     logDepth += 1.f;
-    size >> 1;
+    size >>= 1;
   }
 
-  image[index] = glm::vec3(float(intersec.primId) / logDepth * .06f);
+  image[index] += glm::vec3(float(intersec.primId) / logDepth * .06f);
 }
 
 struct CompactTerminatedPaths {
@@ -543,8 +539,8 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
       cudaDeviceSynchronize();
 
       if (Settings::sortMaterial) {
-        cudaMemcpyDevToHost(devSegmentMatKeys, devIntersecMatKeys,
-                            num_paths * sizeof(int));
+        cudaMemcpyDevToDev(devSegmentMatKeys, devIntersecMatKeys,
+                           num_paths * sizeof(int));
         thrust::sort_by_key(devIntersecMatKeysThr,
                             devIntersecMatKeysThr + num_paths,
                             devIntersectionsThr);
@@ -571,7 +567,7 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
                                    RemoveInvalidPaths());
       num_paths = end - dev_path_thrust;
       // std::cout << "Remaining paths: " << numPaths << "\n";
-      iterationComplete = num_paths == 0;
+      iterationComplete = (num_paths == 0);
       depth++;
 
       if (guiData != nullptr) {
@@ -588,12 +584,12 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
   } else {
     const int BlockSizeSinglePTX = 8;
     const int BlockSizeSinglePTY = 8;
-    int blokcNumSinglePTX =
+    int blockNumSinglePTX =
         (cam.resolution.x + BlockSizeSinglePTX - 1) / BlockSizeSinglePTX;
-    int blokcNumSinglePTY =
+    int blockNumSinglePTY =
         (cam.resolution.y + BlockSizeSinglePTY - 1) / BlockSizeSinglePTY;
 
-    dim3 singlePTBlockNum(blokcNumSinglePTX, blokcNumSinglePTY);
+    dim3 singlePTBlockNum(blockNumSinglePTX, blockNumSinglePTY);
     dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
 
     if (Settings::tracer == Tracer::SingleKernel) {

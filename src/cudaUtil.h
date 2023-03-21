@@ -17,12 +17,15 @@ static void checkCUDAErrorFn(const char *msg, const char *file, int line) {
 #if ERRORCHECK
   cudaDeviceSynchronize();
   cudaError_t err = cudaGetLastError();
-  if (cudaSuccess != err) {
-    fprintf(stderr, "Cuda error: %s in file '%s' in line %i : %s.\n", msg, file,
-            line, cudaGetErrorString(err));
-  } else {
+  if (cudaSuccess == err) {
     return;
   }
+
+  fprintf(stderr, "CUDA error");
+  if (file) {
+    fprintf(stderr, " (%s:%d)", file, line);
+  }
+  fprintf(stderr, ": %s: %s\n", msg, cudaGetErrorString(err));
 #ifdef _WIN32
   getchar();
 #endif
@@ -43,16 +46,17 @@ template <typename T> size_t byteSizeOf(const std::vector<T> &vec) {
 
 static cudaError_t __stdcall cudaMemcpyHostToDev(void *device, const void *host,
                                                  size_t size) {
-  return cudaMemcpy(device, host, size, cudaMemcpyHostToDevice);
+  return cudaMemcpy(device, host, size, cudaMemcpyKind::cudaMemcpyHostToDevice);
 }
 
 static cudaError_t __stdcall cudaMemcpyDevToHost(void *host, const void *device,
                                                  size_t size) {
-  return cudaMemcpy(host, device, size, cudaMemcpyDeviceToHost);
+  return cudaMemcpy(host, device, size, cudaMemcpyKind::cudaMemcpyDeviceToHost);
 }
 
 static cudaError_t __stdcall cudaMemcpyDevToDev(void *deviceDst,
                                                 const void *deviceSrc,
                                                 size_t size) {
-  return cudaMemcpy(deviceDst, deviceSrc, size, cudaMemcpyDeviceToDevice);
+  return cudaMemcpy(deviceDst, deviceSrc, size,
+                    cudaMemcpyKind::cudaMemcpyDeviceToDevice);
 }

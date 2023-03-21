@@ -166,7 +166,13 @@ bool init() {
   (void)io;
   ImGui::StyleColorsClassic();
   ImGui_ImplGlfw_InitForOpenGL(window, true);
-  ImGui_ImplOpenGL3_Init("#version 120");
+  ImGui_ImplOpenGL3_Init("#version 450");
+
+  auto &guiStyle = ImGui::GetStyle();
+  guiStyle.FrameRounding = 1.0f;
+  guiStyle.FramePadding.y = 2.0f;
+  guiStyle.ItemSpacing.y = 6.0f;
+  guiStyle.GrabRounding = 1.0f;
 
   // Initialize other stuff
   initVAO();

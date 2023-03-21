@@ -43,7 +43,7 @@ __host__ __device__ inline float square(float x) { return x * x; }
 
 __host__ __device__ inline float powerHeuristic(float f, float g) {
   float f2 = f * f;
-  return (f2) / (f2 + g * g);
+  return f2 / (f2 + g * g);
 }
 
 __host__ __device__ inline float balanceHeuristic(float f, float g) {
@@ -87,9 +87,8 @@ __host__ __device__ inline float absDot(glm::vec3 a, glm::vec3 b) {
 }
 
 __host__ __device__ inline glm::vec3 ACES(glm::vec3 color) {
-  return glm::clamp((color * (2.51f * color + 0.03f)) /
-                        (color * (2.43f * color + 0.59f) + 0.14f),
-                    0.f, 1.f);
+  return (color * (2.51f * color + 0.03f)) /
+         (color * (2.43f * color + 0.59f) + 0.14f);
   // need clamp?
 }
 
@@ -114,6 +113,7 @@ __device__ static glm::mat3 localRefMatrix(glm::vec3 n) {
   t = glm::cross(b, n);
   return glm::mat3(t, b, n);
 }
+
 __device__ static glm::vec3 localToWorld(glm::vec3 n, glm::vec3 v) {
   return glm::normalize(localRefMatrix(n) * v);
 }
@@ -127,22 +127,21 @@ __device__ static glm::vec3 cosineSampleHemisphere(glm::vec3 n, float rx,
 
 __device__ static bool refract(glm::vec3 n, glm::vec3 wi, float ior,
                                glm::vec3 &wt) {
-  float conIn = glm::dot(n, wi);
-  if (conIn < 0.f) {
+  float cosIn = glm::dot(n, wi);
+  if (cosIn < 0) {
     ior = 1.f / ior;
   }
-  float sin2In = glm::max(0.f, 1.f - conIn * conIn);
+  float sin2In = glm::max(0.f, 1.f - cosIn * cosIn);
   float sin2Tr = sin2In / (ior * ior);
 
   if (sin2Tr >= 1.f) {
     return false;
   }
-
   float cosTr = glm::sqrt(1.f - sin2Tr);
-  if (conIn < 0.f) {
+  if (cosIn < 0) {
     cosTr = -cosTr;
   }
-  wt = glm::normalize(-wi / ior + n * (conIn / ior - cosTr));
+  wt = glm::normalize(-wi / ior + n * (cosIn / ior - cosTr));
   return true;
 }
 

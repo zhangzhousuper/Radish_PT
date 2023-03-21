@@ -7,14 +7,25 @@
 
 #include "image.h"
 
+Image::Image(int width, int height)
+    : mWidth(width), mHeight(height), mPixels(new glm::vec3[width * height]) {}
+
 Image::Image(const std::string &filename) {
   int channels;
 
   // The textures should be in the linear space
   stbi_ldr_to_hdr_gamma(1.f);
-
+  std::cout << "before stbi_loadf" << std::endl;
+  std::cout << "filename: " << filename.c_str() << std::endl;
+  std::cout << "mWidth: " << mWidth << std::endl;
+  std::cout << "mHeight: " << mHeight << std::endl;
+  std::cout << "channels: " << channels << std::endl;
   float *data = stbi_loadf(filename.c_str(), &mWidth, &mHeight, &channels, 3);
-
+  std::cout << "data: " << data << std::endl;
+  if (data) {
+    std::cout << "Loaded " << filename << " (" << mWidth << "x" << mHeight
+              << "x" << channels << ")" << std::endl;
+  }
   if (!data) {
     throw std::runtime_error("Failed to load image " + filename);
   }
@@ -61,7 +72,7 @@ void Image::savePNG(const std::string &baseFilename) {
 
 void Image::saveHDR(const std::string &baseFilename) {
   std::string filename = baseFilename + ".hdr";
-  stbi_write_hdr(filename.c_str(), mWidth, mHeight, 3, (float *)mPixels);
+  stbi_write_hdr(filename.c_str(), mWidth, mHeight, 3, (const float *)mPixels);
 
   std::cout << "Saved image " << filename << std::endl;
 }

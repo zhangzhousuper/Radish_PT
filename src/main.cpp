@@ -199,7 +199,6 @@ void runCuda() {
     cam.up = glm::cross(r, v);
     cam.right = r;
 
-    cam.position = cameraPosition;
     cameraPosition += cam.lookAt;
     cam.position = cameraPosition;
     State::camChanged = false;

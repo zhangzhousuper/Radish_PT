@@ -54,7 +54,7 @@ __host__ __device__ static bool intersectTriangle(Ray ray, glm::vec3 v0,
   }
 
   float invDet = 1.f / det;
-  bary.x *= invDet;
+  bary *= invDet;
   dist = glm::dot(e02, qvec) * invDet;
   return dist > 0.f;
 }

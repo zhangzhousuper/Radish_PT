@@ -23,6 +23,8 @@ public:
   size_t byteSize() const { return mWidth * mHeight * sizeof(glm::vec3); }
 
   glm::vec3 *data() const { return mPixels; }
+
+private:
   int mWidth;
   int mHeight;
   glm::vec3 *mPixels = nullptr;

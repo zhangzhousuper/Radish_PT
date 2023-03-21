@@ -13,7 +13,7 @@ if is_plat("windows") then
     if is_mode("debug") then
         set_runtimes("MDd")
     else
-        set_runtimes("MD")
+        set_runtimes("MT")
     end
 end
 -- support utf-8 on msvc
@@ -38,6 +38,6 @@ target("cuda_pt")
 
     add_packages("glew","glm", "stb", "imgui")
 
-    set_rundir("$(projectdir)")
-    set_runargs("scenes/cornell.txt")
+    set_rundir("$(projectdir)/scenes")
+    set_runargs("cornell.txt")
 target_end()
