@@ -57,19 +57,19 @@ __global__ void sendImageToPBO(uchar4 *pbo, glm::ivec2 resolution, int iter,
 
 #define PixelIdxForTerminated -1
 
-static Scene *hst_scene = nullptr;
+static Scene *hstScene = nullptr;
 static GuiDataContainer *guiData = nullptr;
-static glm::vec3 *dev_image = nullptr;
-static PathSegment *dev_paths = nullptr;
-static PathSegment *dev_terminated_paths = nullptr;
-static Intersection *dev_intersections = nullptr;
+static glm::vec3 *devImage = nullptr;
+static PathSegment *devPaths = nullptr;
+static PathSegment *devTerminatedPaths = nullptr;
+static Intersection *devIntersections = nullptr;
 static int *devIntersecMatKeys = nullptr;
 static int *devSegmentMatKeys = nullptr;
 
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
-static thrust::device_ptr<PathSegment> dev_path_thrust;
-static thrust::device_ptr<PathSegment> dev_terminated_paths_thrust;
+static thrust::device_ptr<PathSegment> devPathsThr;
+static thrust::device_ptr<PathSegment> devTerminatedPathsThr;
 
 static thrust::device_ptr<Intersection> devIntersectionsThr;
 static thrust::device_ptr<int> devIntersecMatKeysThr;
@@ -81,26 +81,25 @@ static glm::vec3 *devGBufferNorm = nullptr;
 void InitDataContainer(GuiDataContainer *imGuiData) { guiData = imGuiData; }
 
 void pathTraceInit(Scene *scene) {
-  hst_scene = scene;
+  hstScene = scene;
 
-  const Camera &cam = hst_scene->state.camera;
-  const int pixelCount = cam.resolution.x * cam.resolution.y;
+  const Camera &cam = hstScene->state.camera;
+  const int pixelcount = cam.resolution.x * cam.resolution.y;
 
-  cudaMalloc(&dev_image, pixelCount * sizeof(glm::vec3));
-  cudaMemset(dev_image, 0, pixelCount * sizeof(glm::vec3));
+  cudaMalloc(&devImage, pixelcount * sizeof(glm::vec3));
+  cudaMemset(devImage, 0, pixelcount * sizeof(glm::vec3));
 
-  cudaMalloc(&dev_paths, pixelCount * sizeof(PathSegment));
-  cudaMalloc(&dev_terminated_paths, pixelCount * sizeof(PathSegment));
-  dev_path_thrust = thrust::device_ptr<PathSegment>(dev_paths);
-  dev_terminated_paths_thrust =
-      thrust::device_ptr<PathSegment>(dev_terminated_paths);
+  cudaMalloc(&devPaths, pixelcount * sizeof(PathSegment));
+  cudaMalloc(&devTerminatedPaths, pixelcount * sizeof(PathSegment));
+  devPathsThr = thrust::device_ptr<PathSegment>(devPaths);
+  devTerminatedPathsThr = thrust::device_ptr<PathSegment>(devTerminatedPaths);
 
-  cudaMalloc(&dev_intersections, pixelCount * sizeof(Intersection));
-  cudaMemset(dev_intersections, 0, pixelCount * sizeof(Intersection));
-  devIntersectionsThr = thrust::device_ptr<Intersection>(dev_intersections);
+  cudaMalloc(&devIntersections, pixelcount * sizeof(Intersection));
+  cudaMemset(devIntersections, 0, pixelcount * sizeof(Intersection));
+  devIntersectionsThr = thrust::device_ptr<Intersection>(devIntersections);
 
-  cudaMalloc(&devIntersecMatKeys, pixelCount * sizeof(int));
-  cudaMalloc(&devSegmentMatKeys, pixelCount * sizeof(int));
+  cudaMalloc(&devIntersecMatKeys, pixelcount * sizeof(int));
+  cudaMalloc(&devSegmentMatKeys, pixelcount * sizeof(int));
   devIntersecMatKeysThr = thrust::device_ptr<int>(devIntersecMatKeys);
   devSegmentMatKeysThr = thrust::device_ptr<int>(devSegmentMatKeys);
 
@@ -108,10 +107,10 @@ void pathTraceInit(Scene *scene) {
 }
 
 void pathTraceFree() {
-  cudaFree(dev_image); // no-op if dev_image is null
-  cudaFree(dev_paths);
-  cudaFree(dev_terminated_paths);
-  cudaFree(dev_intersections);
+  cudaFree(devImage); // no-op if devImage is null
+  cudaFree(devPaths);
+  cudaFree(devTerminatedPaths);
+  cudaFree(devIntersections);
 
   cudaFree(devIntersecMatKeys);
   cudaFree(devSegmentMatKeys);
@@ -122,11 +121,11 @@ void pathTraceFree() {
  */
 __device__ Ray sampleCamera(const Camera &cam, int x, int y, glm::vec4 r) {
   Ray ray;
-  float aspect = float(cam.resolution.x) / float(cam.resolution.y);
+  float aspect = float(cam.resolution.x) / cam.resolution.y;
   float tanFovY = glm::tan(glm::radians(cam.fov.y));
   glm::vec2 pixelSize = 1.f / glm::vec2(cam.resolution);
   glm::vec2 scr = glm::vec2(x, y) * pixelSize;
-  glm::vec2 ruv = scr + glm::vec2(r.x, r.y) * pixelSize;
+  glm::vec2 ruv = scr + pixelSize * glm::vec2(r.x, r.y);
   ruv = 1.f - ruv * 2.f;
 
   glm::vec3 pLens =
@@ -160,9 +159,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth,
     thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
 
     segment.ray = sampleCamera(cam, x, y, sample4D(rng));
-
-    segment.throughput = glm::vec3(1.0f);
-    segment.radiance = glm::vec3(0.0f);
+    segment.throughput = glm::vec3(1.f);
+    segment.radiance = glm::vec3(0.f);
 
     segment.pixelIndex = index;
     segment.remainingBounces = traceDepth;
@@ -174,10 +172,10 @@ __global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
                                int kind) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= width || y >= height)
+  if (x >= width || y >= height) {
     return;
-
-  int index = x + (y * width);
+  }
+  int index = y * width + x;
   thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
 
   Ray ray = sampleCamera(cam, x, y, sample4D(rng));
@@ -190,7 +188,7 @@ __global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
     if (intersec.primId != NullPrimitive) {
       Material m = scene->getTexturedMaterialAndSurface(intersec);
     }
-    image[index] += (intersec.norm + 1.0f) * 0.5f;
+    image[index] += (intersec.norm + 1.f) * .5f;
   } else if (kind == 2) {
     image[index] += glm::vec3(intersec.uv, 1.f);
   }
@@ -199,17 +197,18 @@ __global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
 // computeIntersections handles generating ray intersections ONLY.
 // Generating new rays is handled in your shader(s).
 // Feel free to modify the code below.
-__global__ void computeIntersections(int depth, int num_paths,
+__global__ void computeIntersections(int depth, int numPaths,
                                      PathSegment *pathSegments, DevScene *scene,
                                      Intersection *intersections,
                                      int *materialKeys, bool sortMaterial) {
-  int path_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int pathIdx = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (path_index >= num_paths)
+  if (pathIdx >= numPaths) {
     return;
+  }
 
   Intersection intersec;
-  PathSegment segment = pathSegments[path_index];
+  PathSegment segment = pathSegments[pathIdx];
 #if BVH_DISABLE
   scene->naiveIntersect(segment.ray, intersec);
 #else
@@ -217,7 +216,7 @@ __global__ void computeIntersections(int depth, int num_paths,
 #endif
 
   if (intersec.primId != NullPrimitive) {
-    if (scene->dev_materials[intersec.matId].type == Material::Type::Light) {
+    if (scene->devMaterials[intersec.matId].type == Material::Type::Light) {
 #if SCENE_LIGHT_SINGLE_SIDED
       if (glm::dot(intersec.norm, segment.ray.direction) < 0.f) {
         intersec.primId = NullPrimitive;
@@ -235,24 +234,24 @@ __global__ void computeIntersections(int depth, int num_paths,
       intersec.wo = -segment.ray.direction;
     }
     if (sortMaterial) {
-      materialKeys[path_index] = intersec.matId;
+      materialKeys[pathIdx] = intersec.matId;
     }
   } else if (sortMaterial) {
-    materialKeys[path_index] = -1;
+    materialKeys[pathIdx] = -1;
   }
-  intersections[path_index] = intersec;
+  intersections[pathIdx] = intersec;
 }
 
 __global__ void pathIntegSampleSurface(int iter, int depth,
                                        PathSegment *segments,
                                        Intersection *intersections,
-                                       DevScene *scene, int num_paths,
+                                       DevScene *scene, int numPaths,
                                        bool sortMaterial) {
   const int SamplesConsumedOneIter = 10;
 
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
 
-  if (idx >= num_paths) {
+  if (idx >= numPaths) {
     return;
   }
 
@@ -351,7 +350,7 @@ __global__ void finalGather(int nPaths, glm::vec3 *image,
         return;
       }
       image[iterationPath.pixelIndex] +=
-          glm::clamp(r, glm::vec3(0.f), glm::vec3(FLT_MAX / 10.0f));
+          glm::clamp(r, glm::vec3(0.f), glm::vec3(FLT_MAX / 10.f));
     }
   }
 }
@@ -361,9 +360,9 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
                                int height) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= width || y >= height)
+  if (x >= width || y >= height) {
     return;
-
+  }
   glm::vec3 accRadiance(0.f);
 
   int index = y * width + x;
@@ -445,14 +444,14 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
 
       glm::vec3 radiance = material.baseColor;
       if (deltaSample) {
-        accRadiance += throughput * radiance;
+        accRadiance += radiance * throughput;
       } else {
         float lightPdf = Math::pdfAreaToSolidAngle(
             Math::luminance(radiance) * scene->sumLightPowerInv, curPos,
             intersec.pos, intersec.norm);
         float BSDFPdf = sample.pdf;
         accRadiance +=
-            throughput * radiance * Math::powerHeuristic(BSDFPdf, lightPdf);
+            radiance * throughput * Math::powerHeuristic(BSDFPdf, lightPdf);
       }
       break;
     }
@@ -465,9 +464,9 @@ __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
                              glm::vec3 *image, int width, int height) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= width || y >= height)
+  if (x >= width || y >= height) {
     return;
-
+  }
   int index = y * width + x;
 
   thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
@@ -487,14 +486,14 @@ __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
 }
 
 struct CompactTerminatedPaths {
-  __host__ __device__ bool operator()(const PathSegment &path) {
-    return !(path.pixelIndex >= 0 && path.remainingBounces <= 0);
+  __host__ __device__ bool operator()(const PathSegment &segment) {
+    return !(segment.pixelIndex >= 0 && segment.remainingBounces <= 0);
   }
 };
 
 struct RemoveInvalidPaths {
-  __host__ __device__ bool operator()(const PathSegment &path) {
-    return path.pixelIndex < 0 || path.remainingBounces <= 0;
+  __host__ __device__ bool operator()(const PathSegment &segment) {
+    return segment.pixelIndex < 0 || segment.remainingBounces <= 0;
   }
 };
 
@@ -503,8 +502,8 @@ struct RemoveInvalidPaths {
  * ton of memory management
  */
 void pathTrace(uchar4 *pbo, int frame, int iter) {
-  const Camera &cam = hst_scene->state.camera;
-  const int pixelCount = cam.resolution.x * cam.resolution.y;
+  const Camera &cam = hstScene->state.camera;
+  const int pixelcount = cam.resolution.x * cam.resolution.y;
 
   // 2D block for generating ray from camera
   const dim3 blockSize2D(8, 8);
@@ -513,61 +512,61 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
       (cam.resolution.y + blockSize2D.y - 1) / blockSize2D.y);
 
   generateRayFromCamera<<<blocksPerGrid2D, blockSize2D>>>(
-      cam, iter, Settings::traceDepth, dev_paths);
+      cam, iter, Settings::traceDepth, devPaths);
   checkCUDAError("PT::generateRayFromCamera");
   cudaDeviceSynchronize();
 
   int depth = 0;
-  int num_paths = pixelCount;
+  int numPaths = pixelcount;
 
-  auto dev_terminated_thrust = dev_terminated_paths_thrust;
+  auto devTerminatedThr = devTerminatedPathsThr;
 
   if (Settings::tracer == Tracer::Streamed) {
     bool iterationComplete = false;
     while (!iterationComplete) {
       // clean shading chunks
-      cudaMemset(dev_intersections, 0, pixelCount * sizeof(Intersection));
+      cudaMemset(devIntersections, 0, pixelcount * sizeof(Intersection));
 
       // tracing
-      const int BlockSizeIntersect = 128;
-      int blockNumIntersect =
-          (num_paths + BlockSizeIntersect - 1) / BlockSizeIntersect;
-      computeIntersections<<<blockNumIntersect, BlockSizeIntersect>>>(
-          depth, num_paths, dev_paths, hst_scene->devScene, dev_intersections,
+      const int BlockSizeIntersec = 128;
+      int blockNumIntersec =
+          (numPaths + BlockSizeIntersec - 1) / BlockSizeIntersec;
+      computeIntersections<<<blockNumIntersec, BlockSizeIntersec>>>(
+          depth, numPaths, devPaths, hstScene->devScene, devIntersections,
           devIntersecMatKeys, Settings::sortMaterial);
       checkCUDAError("PT::computeInteractions");
       cudaDeviceSynchronize();
 
       if (Settings::sortMaterial) {
         cudaMemcpyDevToDev(devSegmentMatKeys, devIntersecMatKeys,
-                           num_paths * sizeof(int));
+                           numPaths * sizeof(int));
         thrust::sort_by_key(devIntersecMatKeysThr,
-                            devIntersecMatKeysThr + num_paths,
+                            devIntersecMatKeysThr + numPaths,
                             devIntersectionsThr);
         thrust::sort_by_key(devSegmentMatKeysThr,
-                            devSegmentMatKeysThr + num_paths, dev_path_thrust);
+                            devSegmentMatKeysThr + numPaths, devPathsThr);
       }
 
       const int BlockSizeSample = 64;
-      int blockNumSample = (num_paths + BlockSizeSample - 1) / BlockSizeSample;
+      int blockNumSample = (numPaths + BlockSizeSample - 1) / BlockSizeSample;
 
       pathIntegSampleSurface<<<blockNumSample, BlockSizeSample>>>(
-          iter, depth, dev_paths, dev_intersections, hst_scene->devScene,
-          num_paths, Settings::sortMaterial);
+          iter, depth, devPaths, devIntersections, hstScene->devScene, numPaths,
+          Settings::sortMaterial);
 
       checkCUDAError("PT::sampleSurface");
       cudaDeviceSynchronize();
       // Compact paths that are terminated but carry contribution into a
       // separate buffer
-      dev_terminated_thrust = thrust::remove_copy_if(
-          dev_path_thrust, dev_path_thrust + num_paths, dev_terminated_thrust,
-          CompactTerminatedPaths());
+      devTerminatedThr =
+          thrust::remove_copy_if(devPathsThr, devPathsThr + numPaths,
+                                 devTerminatedThr, CompactTerminatedPaths());
       // Only keep active paths
-      auto end = thrust::remove_if(dev_path_thrust, dev_path_thrust + num_paths,
+      auto end = thrust::remove_if(devPathsThr, devPathsThr + numPaths,
                                    RemoveInvalidPaths());
-      num_paths = end - dev_path_thrust;
+      numPaths = end - devPathsThr;
       // std::cout << "Remaining paths: " << numPaths << "\n";
-      iterationComplete = (num_paths == 0);
+      iterationComplete = (numPaths == 0);
       depth++;
 
       if (guiData != nullptr) {
@@ -577,10 +576,10 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
 
     // Assemble this iteration and apply it to the image
     const int BlockSizeGather = 128;
-    dim3 numBlocksPixels = (pixelCount + BlockSizeGather - 1) / BlockSizeGather;
-    int numContributing = dev_terminated_thrust.get() - dev_terminated_paths;
-    finalGather<<<numBlocksPixels, BlockSizeGather>>>(
-        numContributing, dev_image, dev_terminated_paths);
+    dim3 numBlocksPixels = (pixelcount + BlockSizeGather - 1) / BlockSizeGather;
+    int numContributing = devTerminatedThr.get() - devTerminatedPaths;
+    finalGather<<<numBlocksPixels, BlockSizeGather>>>(numContributing, devImage,
+                                                      devTerminatedPaths);
   } else {
     const int BlockSizeSinglePTX = 8;
     const int BlockSizeSinglePTY = 8;
@@ -594,15 +593,15 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
 
     if (Settings::tracer == Tracer::SingleKernel) {
       singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(
-          iter, Settings::traceDepth, hst_scene->devScene, cam, dev_image,
+          iter, Settings::traceDepth, hstScene->devScene, cam, devImage,
           cam.resolution.x, cam.resolution.y);
     } else if (Settings::tracer == Tracer::BVHVisualize) {
       BVHVisualize<<<singlePTBlockNum, singlePTBlockSize>>>(
-          iter, hst_scene->devScene, cam, dev_image, cam.resolution.x,
+          iter, hstScene->devScene, cam, devImage, cam.resolution.x,
           cam.resolution.y);
     } else {
       previewGBuffer<<<singlePTBlockNum, singlePTBlockSize>>>(
-          iter, hst_scene->devScene, cam, dev_image, cam.resolution.x,
+          iter, hstScene->devScene, cam, devImage, cam.resolution.x,
           cam.resolution.y, Settings::GBufferPreviewOpt);
     }
 
@@ -613,11 +612,11 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
 
   // Send results to OpenGL buffer for rendering
   sendImageToPBO<<<blocksPerGrid2D, blockSize2D>>>(
-      pbo, cam.resolution, iter, dev_image, Settings::toneMapping);
+      pbo, cam.resolution, iter, devImage, Settings::toneMapping);
 
   // Retrieve image from GPU
-  cudaMemcpy(hst_scene->state.image.data(), dev_image,
-             pixelCount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+  cudaMemcpy(hstScene->state.image.data(), devImage,
+             pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
   checkCUDAError("pathTrace");
 }

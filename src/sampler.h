@@ -36,7 +36,7 @@ __device__ inline glm::vec4 sample4D(Sampler &sampler) {
   return glm::vec4(sample3D(sampler), sample1D(sampler));
 }
 
-template <typename T> struct BinomialDistribution {
+template <typename T> struct BinomialDistrib {
   T prob;
   int failId;
 };
@@ -47,7 +47,7 @@ template <typename T> struct BinomialDistribution {
  */
 
 template <typename T> struct DiscreteSampler {
-  using DistribT = BinomialDistribution<T>;
+  using DistribT = BinomialDistrib<T>;
 
   DiscreteSampler() = default;
 
@@ -108,7 +108,7 @@ template <typename T> struct DiscreteSampler {
 };
 
 template <typename T> struct DevDiscreteSampler1D {
-  using DistribT = BinomialDistribution<T>;
+  using DistribT = BinomialDistrib<T>;
 
   void create(const DiscreteSampler<T> &hstSampler) {
     size_t size = byteSizeOf<DistribT>(hstSampler.binomDistribs);
@@ -134,7 +134,7 @@ template <typename T> struct DevDiscreteSampler1D {
 };
 
 template <typename T> struct DevDiscreteSampler2D {
-  using DistribT = BinomialDistribution<T>;
+  using DistribT = BinomialDistrib<T>;
 
   void create(const std::vector<DiscreteSampler<T>> &hstSamplers) {}
 

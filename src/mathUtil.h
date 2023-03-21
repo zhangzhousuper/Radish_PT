@@ -29,14 +29,19 @@ bool epsilonCheck(float a, float b);
 
 glm::mat4 buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation,
                                     glm::vec3 scale);
+template <typename T> bool between(const T &x, const T &min, const T &max) {
+  return x >= min && x <= max;
+}
+__host__ __device__ inline float satDot(glm::vec3 a, glm::vec3 b) {
+  return glm::max(glm::dot(a, b), 0.f);
+}
 
+__host__ __device__ inline float absDot(glm::vec3 a, glm::vec3 b) {
+  return glm::abs(glm::dot(a, b));
+}
 __host__ __device__ inline float pow5(float x) {
   float x2 = x * x;
   return x2 * x2 * x;
-}
-
-template <typename T> bool between(const T &x, const T &min, const T &max) {
-  return x >= min && x <= max;
 }
 
 __host__ __device__ inline float square(float x) { return x * x; }
@@ -76,14 +81,6 @@ template <typename T> __host__ __device__ inline T calcFilmic(T c) {
 }
 __host__ __device__ inline glm::vec3 filmic(glm::vec3 c) {
   return calcFilmic(c * 1.6f) / calcFilmic(11.2f);
-}
-
-__host__ __device__ inline float satDot(glm::vec3 a, glm::vec3 b) {
-  return glm::max(glm::dot(a, b), 0.f);
-}
-
-__host__ __device__ inline float absDot(glm::vec3 a, glm::vec3 b) {
-  return glm::abs(glm::dot(a, b));
 }
 
 __host__ __device__ inline glm::vec3 ACES(glm::vec3 color) {

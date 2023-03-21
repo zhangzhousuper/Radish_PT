@@ -75,15 +75,15 @@ struct DevScene {
   void destroy();
 
   __device__ Material getTexturedMaterialAndSurface(Intersection &intersec) {
-    Material mat = dev_materials[intersec.matId];
+    Material mat = devMaterials[intersec.matId];
     if (mat.baseColorMapId > NullTextureId) {
       mat.baseColor =
-          dev_textureObjs[mat.baseColorMapId].linearSample(intersec.uv);
+          devTextureObjs[mat.baseColorMapId].linearSample(intersec.uv);
     }
 
     if (mat.normalMapId > NullTextureId) {
       glm::vec3 mapped =
-          dev_textureObjs[mat.normalMapId].linearSample(intersec.uv);
+          devTextureObjs[mat.normalMapId].linearSample(intersec.uv);
       glm::vec3 localNorm =
           glm::normalize(glm::vec3(mapped.x, mapped.y, mapped.z) * 1.f - 0.5f);
       intersec.norm = Math::localToWorld(intersec.norm, localNorm);
@@ -109,26 +109,26 @@ struct DevScene {
   }
 
   __device__ glm::vec3 getPrimitivePlainNormal(int primId) {
-    glm::vec3 va = dev_vertices[primId * 3];
-    glm::vec3 vb = dev_vertices[primId * 3 + 1];
-    glm::vec3 vc = dev_vertices[primId * 3 + 2];
+    glm::vec3 va = devVertices[primId * 3];
+    glm::vec3 vb = devVertices[primId * 3 + 1];
+    glm::vec3 vc = devVertices[primId * 3 + 2];
 
     return glm::normalize(glm::cross(vb - va, vc - va));
   }
 
   __device__ void getIntersecGeomInfo(int primId, glm::vec2 bary,
                                       Intersection &intersec) {
-    glm::vec3 va = dev_vertices[primId * 3];
-    glm::vec3 vb = dev_vertices[primId * 3 + 1];
-    glm::vec3 vc = dev_vertices[primId * 3 + 2];
+    glm::vec3 va = devVertices[primId * 3];
+    glm::vec3 vb = devVertices[primId * 3 + 1];
+    glm::vec3 vc = devVertices[primId * 3 + 2];
 
-    glm::vec3 na = dev_normals[primId * 3];
-    glm::vec3 nb = dev_normals[primId * 3 + 1];
-    glm::vec3 nc = dev_normals[primId * 3 + 2];
+    glm::vec3 na = devNormals[primId * 3];
+    glm::vec3 nb = devNormals[primId * 3 + 1];
+    glm::vec3 nc = devNormals[primId * 3 + 2];
 
-    glm::vec2 ta = dev_texcoords[primId * 3];
-    glm::vec2 tb = dev_texcoords[primId * 3 + 1];
-    glm::vec2 tc = dev_texcoords[primId * 3 + 2];
+    glm::vec2 ta = devTexcoords[primId * 3];
+    glm::vec2 tb = devTexcoords[primId * 3 + 1];
+    glm::vec2 tc = devTexcoords[primId * 3 + 2];
 
     intersec.pos = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
     intersec.norm = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
@@ -137,9 +137,9 @@ struct DevScene {
 
   __device__ bool intersectPrim(int primId, Ray ray, float &dist,
                                 glm::vec2 &bary) {
-    glm::vec3 va = dev_vertices[primId * 3];
-    glm::vec3 vb = dev_vertices[primId * 3 + 1];
-    glm::vec3 vc = dev_vertices[primId * 3 + 2];
+    glm::vec3 va = devVertices[primId * 3];
+    glm::vec3 vb = devVertices[primId * 3 + 1];
+    glm::vec3 vc = devVertices[primId * 3 + 2];
 
     if (!intersectTriangle(ray, va, vb, vc, bary, dist)) {
       return false;
@@ -150,9 +150,9 @@ struct DevScene {
   }
 
   __device__ bool intersectPrim(int primId, Ray ray, float distRange) {
-    glm::vec3 va = dev_vertices[primId * 3];
-    glm::vec3 vb = dev_vertices[primId * 3 + 1];
-    glm::vec3 vc = dev_vertices[primId * 3 + 2];
+    glm::vec3 va = devVertices[primId * 3];
+    glm::vec3 vb = devVertices[primId * 3 + 1];
+    glm::vec3 vc = devVertices[primId * 3 + 2];
     glm::vec2 bary;
     float dist;
     bool hit = intersectTriangle(ray, va, vb, vc, bary, dist);
@@ -161,9 +161,9 @@ struct DevScene {
 
   __device__ bool intersectPrimDetailed(int primId, Ray ray,
                                         Intersection &intersec) {
-    glm::vec3 va = dev_vertices[primId * 3];
-    glm::vec3 vb = dev_vertices[primId * 3 + 1];
-    glm::vec3 vc = dev_vertices[primId * 3 + 2];
+    glm::vec3 va = devVertices[primId * 3];
+    glm::vec3 vb = devVertices[primId * 3 + 1];
+    glm::vec3 vc = devVertices[primId * 3 + 2];
     float dist;
     glm::vec2 bary;
 
@@ -171,13 +171,13 @@ struct DevScene {
       return false;
     }
 
-    glm::vec3 na = dev_normals[primId * 3 + 0];
-    glm::vec3 nb = dev_normals[primId * 3 + 1];
-    glm::vec3 nc = dev_normals[primId * 3 + 2];
+    glm::vec3 na = devNormals[primId * 3 + 0];
+    glm::vec3 nb = devNormals[primId * 3 + 1];
+    glm::vec3 nc = devNormals[primId * 3 + 2];
 
-    glm::vec2 ta = dev_texcoords[primId * 3 + 0];
-    glm::vec2 tb = dev_texcoords[primId * 3 + 1];
-    glm::vec2 tc = dev_texcoords[primId * 3 + 2];
+    glm::vec2 ta = devTexcoords[primId * 3 + 0];
+    glm::vec2 tb = devTexcoords[primId * 3 + 1];
+    glm::vec2 tc = devTexcoords[primId * 3 + 2];
 
     intersec.pos = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
     intersec.norm = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
@@ -204,7 +204,7 @@ struct DevScene {
 
     if (closestPrimId != NullPrimitive) {
       intersec.primId = closestPrimId;
-      intersec.matId = dev_materialIds[closestPrimId];
+      intersec.matId = devMaterialIds[closestPrimId];
       getIntersecGeomInfo(closestPrimId, closestBary, intersec);
     } else {
       intersec.primId = NullPrimitive;
@@ -234,11 +234,11 @@ struct DevScene {
     glm::vec2 closestBary;
     float closestDist = FLT_MAX;
 
-    MTBVHNode *nodes = dev_bvh[getMTBVHId(-ray.direction)];
+    MTBVHNode *nodes = devBVHNodes[getMTBVHId(-ray.direction)];
     int node = 0;
 
     while (node != BVHSize) {
-      AABB &bound = dev_aabb[nodes[node].boundingBoxId];
+      AABB &bound = devBoundingBoxes[nodes[node].boundingBoxId];
       float boundDist;
       bool boundHit = bound.intersect(ray, boundDist);
 
@@ -265,7 +265,7 @@ struct DevScene {
 
     if (closestPrimId != NullPrimitive) {
       getIntersecGeomInfo(closestPrimId, closestBary, intersec);
-      intersec.matId = dev_materialIds[closestPrimId];
+      intersec.matId = devMaterialIds[closestPrimId];
     }
     intersec.primId = closestPrimId;
   }
@@ -280,11 +280,11 @@ struct DevScene {
 
     Ray ray = makeOffsetedRay(x, dir);
 
-    MTBVHNode *nodes = dev_bvh[getMTBVHId(-ray.direction)];
+    MTBVHNode *nodes = devBVHNodes[getMTBVHId(-ray.direction)];
     int node = 0;
 
     while (node != BVHSize) {
-      AABB &bound = dev_aabb[nodes[node].boundingBoxId];
+      AABB &bound = devBoundingBoxes[nodes[node].boundingBoxId];
       float boundDist;
       bool boundHit = bound.intersect(ray, boundDist);
 
@@ -308,12 +308,12 @@ struct DevScene {
     int closestPrimId = NullPrimitive;
     glm::vec2 closestBary;
 
-    MTBVHNode *nodes = dev_bvh[getMTBVHId(-ray.direction)];
+    MTBVHNode *nodes = devBVHNodes[getMTBVHId(-ray.direction)];
     int node = 0;
     int maxDepth = 0;
 
     while (node != BVHSize) {
-      AABB &bound = dev_aabb[nodes[node].boundingBoxId];
+      AABB &bound = devBoundingBoxes[nodes[node].boundingBoxId];
       float boundDist;
       bool boundHit = bound.intersect(ray, boundDist);
 
@@ -347,13 +347,13 @@ struct DevScene {
   __device__ float sampleDirectLight(glm::vec3 pos, glm::vec4 r,
                                      glm::vec3 &radiance, glm::vec3 &wi) {
     int passId = int(float(numLightPrims) * r.x);
-    BinomialDistribution<float> distrib = devLightDistrib[passId];
+    BinomialDistrib<float> distrib = devLightDistrib[passId];
     int lightId = (r.y < distrib.prob) ? passId : distrib.failId;
     int primId = devLightPrimIds[lightId];
 
-    glm::vec3 v0 = dev_vertices[primId];
-    glm::vec3 v1 = dev_vertices[primId + 1];
-    glm::vec3 v2 = dev_vertices[primId + 2];
+    glm::vec3 v0 = devVertices[primId * 3 + 0];
+    glm::vec3 v1 = devVertices[primId * 3 + 1];
+    glm::vec3 v2 = devVertices[primId * 3 + 2];
     glm::vec3 sampled = Math::sampleTriangleUniform(v0, v1, v2, r.z, r.w);
 
 #if BVH_DISABLE
@@ -380,22 +380,21 @@ struct DevScene {
         Math::luminance(radiance) * sumLightPowerInv, pos, sampled, normal);
   }
 
-  glm::vec3 *dev_vertices = nullptr;
-  glm::vec3 *dev_normals = nullptr;
-  glm::vec3 *dev_texcoords = nullptr;
-
-  AABB *dev_aabb = nullptr;
-  MTBVHNode *dev_bvh[6] = {nullptr};
+  glm::vec3 *devVertices = nullptr;
+  glm::vec3 *devNormals = nullptr;
+  glm::vec2 *devTexcoords = nullptr;
+  AABB *devBoundingBoxes = nullptr;
+  MTBVHNode *devBVHNodes[6] = {nullptr};
   int BVHSize;
 
-  int *dev_materialIds = nullptr;
-  Material *dev_materials = nullptr;
-  glm::vec3 *dev_textures = nullptr;
-  DevTextureObj *dev_textureObjs = nullptr;
+  int *devMaterialIds = nullptr;
+  Material *devMaterials = nullptr;
+  glm::vec3 *devTextureData = nullptr;
+  DevTextureObj *devTextureObjs = nullptr;
 
   int *devLightPrimIds = nullptr;
   glm::vec3 *devLightUnitRadiance = nullptr;
-  BinomialDistribution<float> *devLightDistrib;
+  BinomialDistrib<float> *devLightDistrib;
   int numLightPrims;
   float sumLightPowerInv;
 };
@@ -448,5 +447,5 @@ public:
   DevScene *devScene = nullptr;
 
 private:
-  std::ifstream fp_in;
+  std::ifstream fpIn;
 };

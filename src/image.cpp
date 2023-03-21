@@ -39,8 +39,8 @@ Image::~Image() {
 }
 
 void Image::setPixel(int x, int y, const glm::vec3 &pixel) {
-  assert(expression : x >= 0 && x < mWidth && y >= 0 && y < mHeight);
-  mPixels[y * mWidth + x] = pixel;
+  assert(x >= 0 && y >= 0 && x < mWidth && y < mHeight);
+  mPixels[(y * mWidth) + x] = pixel;
 }
 
 void Image::savePNG(const std::string &baseFilename) {

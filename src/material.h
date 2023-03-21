@@ -261,7 +261,7 @@ struct Material {
     }
   }
   int type = Type::Lambertian;
-  glm::vec3 baseColor = glm::vec3(.7f);
+  glm::vec3 baseColor = glm::vec3(.9f);
 
   float metallic = 0.f;
   float roughness = 1.f;
