@@ -78,8 +78,51 @@ static thrust::device_ptr<int> devSegmentMatKeysThr;
 static glm::vec3 *devGBufferPos = nullptr;
 static glm::vec3 *devGBufferNorm = nullptr;
 
+#if ENABLE_GBUFFER
+static Intersection *devGBuffer = nullptr;
+#endif
+
 void InitDataContainer(GuiDataContainer *imGuiData) { guiData = imGuiData; }
 
+__global__ void renderGBuffer(DevScene *scene, Camera cam,
+                              Intersection *GBuffer) {
+  int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+  int idy = (blockIdx.y * blockDim.y) + threadIdx.y;
+  if (idx >= cam.resolution.x || idy >= cam.resolution.y)
+    return;
+
+  float aspect = float(cam.resolution.x) / cam.resolution.y;
+  float tanFovY = glm::tan(glm::radians(cam.fov.y));
+  glm::vec2 pixelSize = 1.f / glm::vec2(cam.resolution);
+  glm::vec2 scr = glm::vec2(idx, idy) * pixelSize;
+  glm::vec2 ruv = scr + pixelSize * glm::vec2(.5f);
+  ruv = 1.f - ruv * 2.f;
+
+  glm::vec3 pLens(0.f);
+  glm::vec3 pFocus =
+      glm::vec3(ruv * glm::vec2(aspect, 1.f) * tanFovY, 1.f) * cam.focalDist;
+  glm::vec3 dir = (pFocus - pLens);
+
+  Ray ray;
+  ray.direction = glm::normalize(glm::mat3(cam.right, cam.up, cam.view) * dir);
+  ray.origin = cam.position + cam.right * pLens.x + cam.up * pLens.y;
+
+  Intersection intersec;
+  scene->intersect(ray, intersec);
+
+  if (intersec.primId != NullPrimitive) {
+    if (scene->materials[intersec.matId].type == Material::Type::Light) {
+#if SCENE_LIGHT_SINGLE_SIDED
+      if (glm::dot(intersec.norm, ray.direction) < 0.f) {
+        intersec.primId = NullPrimitive;
+      }
+#endif
+    } else {
+      intersec.wo = -ray.direction;
+    }
+  }
+  GBuffer[idy * cam.resolution.x + idx] = intersec;
+}
 void pathTraceInit(Scene *scene) {
   hstScene = scene;
 
@@ -104,16 +147,32 @@ void pathTraceInit(Scene *scene) {
   devSegmentMatKeysThr = thrust::device_ptr<int>(devSegmentMatKeys);
 
   checkCUDAError("pathTraceInit");
+
+#if ENABLE_GBUFFER
+  cudaMalloc(&devGBuffer, pixelcount * sizeof(Intersection));
+  const int BlockSize = 8;
+  dim3 blockSize(BlockSize, BlockSize);
+
+  dim3 blockNum((cam.resolution.x + BlockSize - 1) / BlockSize,
+                (cam.resolution.y + BlockSize - 1) / BlockSize);
+  renderGBuffer<<<blockNum, blockSize>>>(hstScene->devScene, cam, devGBuffer);
+  checkCUDAError("GBuffer");
+  std::cout << "[GBuffer generated]" << std::endl;
+#endif
 }
 
 void pathTraceFree() {
-  cudaFree(devImage); // no-op if devImage is null
-  cudaFree(devPaths);
-  cudaFree(devTerminatedPaths);
-  cudaFree(devIntersections);
+  cudaSafeFree(devImage); // no-op if devImage is null
+  cudaSafeFree(devPaths);
+  cudaSafeFree(devTerminatedPaths);
+  cudaSafeFree(devIntersections);
 
-  cudaFree(devIntersecMatKeys);
-  cudaFree(devSegmentMatKeys);
+  cudaSafeFree(devIntersecMatKeys);
+  cudaSafeFree(devSegmentMatKeys);
+
+#if ENABLE_GBUFFER
+  cudaSafeFree(devGBuffer);
+#endif
 }
 
 /**
@@ -188,16 +247,15 @@ __global__ void generateRayFromCamera(DevScene *scene, Camera cam, int iter,
     segment.remainingBounces = traceDepth;
   }
 }
-
 __global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
-                               glm::vec3 *image, int width, int height,
-                               int kind) {
+                               glm::vec3 *image, int kind) {
+
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= width || y >= height) {
+  if (x >= cam.resolution.x || y >= cam.resolution.y) {
     return;
   }
-  int index = y * width + x;
+  int index = y * cam.resolution.x + x;
   Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
   Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
@@ -222,7 +280,13 @@ __global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
 __global__ void computeIntersections(int depth, int numPaths,
                                      PathSegment *pathSegments, DevScene *scene,
                                      Intersection *intersections,
-                                     int *materialKeys, bool sortMaterial) {
+                                     int *materialKeys, bool sortMaterial
+#if ENABLE_GBUFFER
+                                     ,
+                                     Intersection *GBuffer
+#endif
+) {
+
   int pathIdx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (pathIdx >= numPaths) {
@@ -231,6 +295,12 @@ __global__ void computeIntersections(int depth, int numPaths,
 
   Intersection intersec;
   PathSegment segment = pathSegments[pathIdx];
+#if ENABLE_GBUFFER
+  if (depth == 0) {
+    intersections[pathIdx] = GBuffer[pathIdx];
+    return;
+  }
+#endif
 #if BVH_DISABLE
   scene->naiveIntersect(segment.ray, intersec);
 #else
@@ -396,16 +466,15 @@ __global__ void finalGather(int nPaths, glm::vec3 *image,
 }
 
 __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
-                               Camera cam, glm::vec3 *image, int width,
-                               int height) {
+                               Camera cam, glm::vec3 *image) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= width || y >= height) {
+  if (x >= cam.resolution.x || y >= cam.resolution.y) {
     return;
   }
   glm::vec3 accRadiance(0.f);
 
-  int index = y * width + x;
+  int index = y * cam.resolution.x + x;
   Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
   Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
@@ -519,17 +588,21 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
     }
   }
 WriteRadiance:
+  if (isnan(accRadiance.x) || isnan(accRadiance.y) || isnan(accRadiance.z) ||
+      isinf(accRadiance.x) || isinf(accRadiance.y) || isinf(accRadiance.z)) {
+    return;
+  }
   image[index] += accRadiance;
 }
 
 __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
-                             glm::vec3 *image, int width, int height) {
+                             glm::vec3 *image) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= width || y >= height) {
+  if (x >= cam.resolution.x || y >= cam.resolution.y) {
     return;
   }
-  int index = y * width + x;
+  int index = y * cam.resolution.x + x;
 
   Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
   Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
@@ -573,17 +646,17 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
       (cam.resolution.x + blockSize2D.x - 1) / blockSize2D.x,
       (cam.resolution.y + blockSize2D.y - 1) / blockSize2D.y);
 
-  generateRayFromCamera<<<blocksPerGrid2D, blockSize2D>>>(
-      hstScene->devScene, cam, iter, Settings::traceDepth, devPaths);
-  checkCUDAError("PT::generateRayFromCamera");
-  cudaDeviceSynchronize();
-
   int depth = 0;
   int numPaths = pixelcount;
 
   auto devTerminatedThr = devTerminatedPathsThr;
 
   if (Settings::tracer == Tracer::Streamed) {
+    generateRayFromCamera<<<blocksPerGrid2D, blockSize2D>>>(
+        hstScene->devScene, cam, iter, Settings::traceDepth, devPaths);
+    checkCUDAError("PT::generateRayFromCamera");
+    cudaDeviceSynchronize();
+
     bool iterationComplete = false;
     while (!iterationComplete) {
       // clean shading chunks
@@ -595,7 +668,13 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
           (numPaths + BlockSizeIntersec - 1) / BlockSizeIntersec;
       computeIntersections<<<blockNumIntersec, BlockSizeIntersec>>>(
           depth, numPaths, devPaths, hstScene->devScene, devIntersections,
-          devIntersecMatKeys, Settings::sortMaterial);
+          devIntersecMatKeys, Settings::sortMaterial
+#if ENABLE_GBUFFER
+          ,
+          devGBuffer
+#endif
+      );
+
       checkCUDAError("PT::computeInteractions");
       cudaDeviceSynchronize();
 
@@ -655,16 +734,13 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
 
     if (Settings::tracer == Tracer::SingleKernel) {
       singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(
-          iter, Settings::traceDepth, hstScene->devScene, cam, devImage,
-          cam.resolution.x, cam.resolution.y);
+          iter, Settings::traceDepth, hstScene->devScene, cam, devImage);
     } else if (Settings::tracer == Tracer::BVHVisualize) {
       BVHVisualize<<<singlePTBlockNum, singlePTBlockSize>>>(
-          iter, hstScene->devScene, cam, devImage, cam.resolution.x,
-          cam.resolution.y);
+          iter, hstScene->devScene, cam, devImage);
     } else {
       previewGBuffer<<<singlePTBlockNum, singlePTBlockSize>>>(
-          iter, hstScene->devScene, cam, devImage, cam.resolution.x,
-          cam.resolution.y, Settings::GBufferPreviewOpt);
+          iter, hstScene->devScene, cam, devImage, Settings::GBufferPreviewOpt);
     }
 
     if (guiData != nullptr) {

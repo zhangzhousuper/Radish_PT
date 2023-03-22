@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "glm/geometric.hpp"
+#include "thrust/detail/use_default.h"
 #include "tiny_obj_loader.h"
 
 #include "glm/glm.hpp"
@@ -71,10 +72,24 @@ struct DevScene {
   void create(const Scene &scene);
   void destroy();
 
+  __device__ glm::vec3 proceduralTexture(glm::vec2 uv) {
+    thrust::default_random_engine rng(int(uv.x * 1024) * 1024 +
+                                      int(uv.y * 1024));
+    float rx = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+    float ry = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+
+    float f = (glm::sin(uv.x * 10.f * TWO_PI + rx * TWO_PI) + +1.f) * .5f;
+    float g = (glm::sin(uv.y * 10.f * TWO_PI + ry * TWO_PI) + +1.f) * .5f;
+    return glm::vec3(f * g);
+  }
+
   __device__ Material getTexturedMaterialAndSurface(Intersection &intersec) {
     Material mat = materials[intersec.matId];
-    if (mat.baseColorMapId > NullTextureId) {
-      mat.baseColor = textures[mat.baseColorMapId].linearSample(intersec.uv);
+    if (mat.baseColorMapId != NullTextureId) {
+      mat.baseColor =
+          mat.baseColorMapId == ProceduralTexId
+              ? proceduralTexture(intersec.uv)
+              : textures[mat.baseColorMapId].linearSample(intersec.uv);
     }
 
     if (mat.metallicMapId > NullTextureId) {
@@ -85,7 +100,7 @@ struct DevScene {
       mat.roughness = textures[mat.roughnessMapId].linearSample(intersec.uv).r;
     }
 
-    if (mat.normalMapId > NullTextureId) {
+    if (mat.normalMapId != NullTextureId) {
       glm::vec3 mapped = textures[mat.normalMapId].linearSample(intersec.uv);
       glm::vec3 localNorm =
           glm::normalize(glm::vec3(mapped.x, mapped.y, mapped.z) * 1.f - 0.5f);
@@ -334,7 +349,6 @@ struct DevScene {
             closestPrimId = primId;
             closestDist = dist;
             closestBary = bary;
-            maxDepth += 1.f;
           }
         }
         node++;

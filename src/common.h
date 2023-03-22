@@ -12,8 +12,6 @@
 
 #define CAMERA_PANORAMA false
 
-#define CAMERA_APERTURE_MASK false
-
 struct ToneMapping {
   enum { None = 0, Filmic = 1, ACES = 2 };
 };

@@ -255,7 +255,6 @@ void RenderImGui() {
 
     glm::vec3 lastPos = cam.position;
     if (ImGui::DragFloat3("Position", glm::value_ptr(cam.position), .1f)) {
-      cam.rotation += cam.position - lastPos;
       State::camChanged = true;
     }
     if (ImGui::DragFloat3("Rotation", glm::value_ptr(cam.rotation), .1f)) {
@@ -266,7 +265,7 @@ void RenderImGui() {
       State::camChanged = true;
     }
 
-    if (ImGui::DragFloat("Apature", &cam.lensRadius, .01f, 0.f, 3.f)) {
+    if (ImGui::DragFloat("Aperture", &cam.lensRadius, .01f, 0.f, 3.f)) {
       State::camChanged = true;
     }
     if (ImGui::DragFloat("Focal", &cam.focalDist, .1f, 0.f, FLT_MAX,

@@ -415,6 +415,9 @@ void Scene::loadMaterial(const std::string &materialId) {
         glm::vec3 baseColor(std::stof(tokens[1]), std::stof(tokens[2]),
                             std::stof(tokens[3]));
         material.baseColor = baseColor;
+      } else if (tokens[1] == "Procedural") {
+        material.baseColorMapId = ProceduralTexId;
+        std::cout << "\t\t[BaseColor use procedural texture]" << std::endl;
       } else {
         material.baseColorMapId = addTexture(tokens[1]);
         std::cout << "\t\t[BaseColor use texture " << tokens[1] << "]"
