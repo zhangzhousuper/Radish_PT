@@ -2,4 +2,4 @@
 
 ## Gallery
 
-![](./img/cornell.jpg)
+![](./img/cornell.png)
