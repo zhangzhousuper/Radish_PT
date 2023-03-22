@@ -1,28 +1,55 @@
 #pragma once
 
+#include "common.h"
 #include "cudaUtil.h"
 #include "driver_types.h"
 #include "mathUtil.h"
+#include <stdint.h>
 #include <thrust/random.h>
 #include <vcruntime.h>
 
-#define SAMPLER_USE_SOBOL false
-
 #if SAMPLER_USE_SOBOL
+#define SobolSampleNum 10000
+#define SobolSampleDim 200
+
+struct Sampler {
+  __device__ Sampler() = default;
+
+  __device__ Sampler(int ptr, uint32_t scramble, uint32_t *data)
+      : ptr(ptr), scramble(scramble), data(data) {}
+
+  __device__ float sample() {
+    uint32_t r = data[ptr++] ^ scramble;
+    scramble = Math::utilhash(scramble);
+    return r * 0x1p-32f;
+  }
+
+  uint32_t *data;
+  uint32_t scramble;
+  int ptr;
+};
+
+__device__ static Sampler makeSeededRandomEngine(int iter, int index, int dim,
+                                                 uint32_t *data) {
+  return Sampler(iter * SobolSampleDim + dim, Math::utilhash(index), data);
+}
+
+__device__ inline float sample1D(Sampler &sampler) { return sampler.sample(); }
+
 #else
 using Sampler = thrust::default_random_engine;
-#endif
 
-__host__ __device__ static thrust::default_random_engine
-makeSeededRandomEngine(int iter, int index, int depth) {
+__device__ static Sampler makeSeededRandomEngine(int iter, int index, int dim,
+                                                 uint32_t *data) {
   int h =
-      Math::utilhash((1 << 31) | (depth << 22) | iter) ^ Math::utilhash(index);
-  return thrust::default_random_engine(h);
+      Math::utilhash((1 << 31) | (dim << 22) | iter) ^ Math::utilhash(index);
+  return Sampler(h);
 }
 
-__device__ inline float sample1D(thrust::default_random_engine &rng) {
-  return thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+__device__ inline float sample1D(Sampler &sampler) {
+  return thrust::uniform_real_distribution<float>(0.f, 1.f)(sampler);
 }
+#endif
 
 __device__ inline glm::vec2 sample2D(Sampler &sampler) {
   return glm::vec2(sample1D(sampler), sample1D(sampler));
@@ -97,6 +124,11 @@ template <typename T> struct DiscreteSampler1D {
     }
   }
 
+  void clear() {
+    binomDistribs.clear();
+    sum = static_cast<T>(0);
+  }
+
   int sample(float r1, float r2) {
     int passId = int(float(binomDistribs.size()) * r1);
     DistribT distrib = binomDistribs[passId];
@@ -134,6 +166,12 @@ template <typename T> struct DiscreteSampler2D {
       sumRows[i] *= sumInv;
     }
     rowSampler = DiscreteSampler1D<T>(sumRows);
+  }
+
+  void clear() {
+    columnSamplers.clear();
+    rowSampler.clear();
+    sum = static_cast<T>(0);
   }
 
   std::pair<int, int> sample(float r1, float r2, float r3, float r4) {

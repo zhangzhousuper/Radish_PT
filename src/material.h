@@ -183,7 +183,8 @@ struct Material {
       return glm::vec3(0.f);
     }
 
-    glm::vec3 f = fresnelSchlick(glm::dot(h, wo), baseColor * metallic);
+    glm::vec3 f = fresnelSchlick(
+        glm::dot(h, wo), glm::mix(glm::vec3(.08f), baseColor, metallic));
     float d = ggxDistribution(glm::dot(n, h), alpha);
     float g = smithG(cosO, cosI, alpha);
 
@@ -269,4 +270,6 @@ struct Material {
 
   int baseColorMapId = NullTextureId;
   int normalMapId = NullTextureId;
+  int metallicMapId = NullTextureId;
+  int roughnessMapId = NullTextureId;
 };

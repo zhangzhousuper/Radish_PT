@@ -3,6 +3,7 @@
 #include "driver_types.h"
 #include "glm/gtx/dual_quaternion.hpp"
 #include "glm/trigonometric.hpp"
+#include "stb_image.h"
 #include <cstring>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
@@ -45,29 +46,6 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
   }
   bool hasTexcoord = !attrib.texcoords.empty();
 
-#if MESH_DATA_INDEXED
-  model->vertices.resize(attrib.vertices.size() / 3);
-  model->normals.resize(attrib.normals.size() / 3);
-  memcpy(model->vertices.data(), attrib.vertices.data(),
-         attrib.vertices.size() * sizeof(float));
-  memcpy(model->normals.data(), attrib.normals.data(),
-         attrib.normals.size() * sizeof(float));
-  if (hasTexcoord) {
-    model->texcoord.resize(attrib.texcoords.size() / 2);
-    memcpy(model->texcoords.data(), attrib.texcoords.data(),
-           attrib.texcoords.size() * sizeof(float));
-  } else {
-    model->texcoord.resize(attrib.vertices.size() / 3);
-  }
-
-  for (const auto &shape : shapes) {
-    for (auto idx : shape.mesh.indices) {
-      model->indices.push_back(
-          {idx.vertex_index, idx.normal_index,
-           hasTexcoord ? idx.texcoord_index : idx.vertex_index});
-    }
-  }
-#else
   for (const auto &shape : shapes) {
     for (auto idx : shape.mesh.indices) {
       model->vertices.push_back(
@@ -80,7 +58,6 @@ MeshData *Resource::loadOBJMesh(const std::string &filename) {
               : glm::vec2(0.f));
     }
   }
-#endif
   std::cout << "\t\t[Vertex count = " << model->vertices.size() << "]"
             << std::endl;
   meshDataPool[filename] = model;
@@ -126,6 +103,9 @@ void Resource::clear() {
 }
 
 Scene::Scene(const std::string &filename) {
+  stbi_ldr_to_hdr_gamma(1.f);
+  stbi_set_flip_vertically_on_load(true);
+
   std::cout << "[Reading scene from " << filename << " ]..." << std::endl;
   std::cout << " " << std::endl;
   char *fname = (char *)filename.c_str();
@@ -142,16 +122,15 @@ Scene::Scene(const std::string &filename) {
       std::vector<std::string> tokens = utilityCore::tokenizeString(line);
       if (tokens[0] == "Material") {
         loadMaterial(tokens[1]);
-        std::cout << " " << std::endl;
       } else if (tokens[0] == "Object") {
         loadModel(tokens[1]);
-        std::cout << " " << std::endl;
       } else if (tokens[0] == "Camera") {
         loadCamera();
-        std::cout << " " << std::endl;
       } else if (tokens[0] == "EnvMap") {
         if (tokens[1] != "Null") {
-          loadEnvMap(tokens[1]);
+          stbi_set_flip_vertically_on_load(false);
+          envMapTexId = addTexture(tokens[1]);
+          stbi_set_flip_vertically_on_load(true);
         }
       }
     }
@@ -162,16 +141,50 @@ Scene::~Scene() {}
 
 void Scene::createLightSampler() {
   if (envMapTexId != NullTextureId) {
+    auto envMap = textures[envMapTexId];
+    std::vector<float> pdf(envMap->width() * envMap->height());
+
+    for (int i = 0; i < envMap->height(); i++) {
+      for (int j = 0; j < envMap->width(); j++) {
+        int idx = i * envMap->width() + j;
+        pdf[idx] = Math::luminance(envMap->data()[idx]);
+      }
+    }
+    envMapSampler = DiscreteSampler1D<float>(pdf);
+    std::cout << "\t[Environment sampler width = " << envMap->width()
+              << ", height = " << envMap->height()
+              << ", sumPower = " << envMapSampler.sum << "]\n"
+              << std::endl;
+
     lightPower.push_back(envMapSampler.sum);
   }
   lightSampler = DiscreteSampler1D<float>(lightPower);
-  std::cout << "[Light sampler size = " << lightPower.size() << "]"
+  std::cout << "[Light sampler size = " << lightPower.size()
+            << ", sumPower = " << lightSampler.sum << "]\n"
+            << std::endl;
+}
+
+void Scene::createApertureSampler() {
+  if (apertureMaskTexId == NullTextureId) {
+    return;
+  }
+  auto apertureMask = textures[apertureMaskTexId];
+  std::vector<float> pdf(apertureMask->width() * apertureMask->height());
+
+  for (int i = 0; i < apertureMask->width(); i++) {
+    for (int j = 0; j < apertureMask->height(); j++) {
+      int idx = i * apertureMask->height() + j;
+      pdf[idx] = Math::luminance(apertureMask->data()[idx]);
+    }
+  }
+  apertureSampler = DiscreteSampler1D<float>(pdf);
+  std::cout << "[Aperture sampler width = " << apertureMask->width()
+            << ", height = " << apertureMask->height() << "]\n"
             << std::endl;
 }
 
 void Scene::buildDevData() {
-#if MESH_DATA_INDEXED
-#else
+
   int primId = 0;
   for (const auto &inst : modelInstances) {
     const auto &material = materials[inst.materialId];
@@ -205,13 +218,14 @@ void Scene::buildDevData() {
       }
     }
   }
-#endif
   if (primId == 0) {
     std::cout << "[No mesh data loaded, quit]" << std::endl;
     exit(-1);
   }
 
   createLightSampler();
+  createApertureSampler();
+
   BVHSize = BVHBuilder::build(meshData.vertices, boundingBoxes, BVHNodes);
   checkCUDAError("BVH Build");
 
@@ -226,7 +240,9 @@ void Scene::buildDevData() {
 
   lightPrimIds.clear();
   lightPower.clear();
-  lightSampler.binomDistribs.clear();
+  lightSampler.clear();
+  envMapSampler.clear();
+  apertureSampler.clear();
 }
 
 void Scene::clear() {
@@ -302,11 +318,11 @@ void Scene::loadCamera() {
   float fovy;
 
   // load static properties
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < 8; i++) {
     std::string line;
     utilityCore::safeGetline(fpIn, line);
     std::vector<std::string> tokens = utilityCore::tokenizeString(line);
-    if (strcmp(tokens[0].c_str(), "Resolution") == 0) {
+    if (tokens[0] == "Resolution") {
       camera.resolution.x = std::stoi(tokens[1]);
       camera.resolution.y = std::stoi(tokens[2]);
     } else if (tokens[0] == "FovY") {
@@ -315,6 +331,12 @@ void Scene::loadCamera() {
       camera.lensRadius = std::stof(tokens[1]);
     } else if (tokens[0] == "FocalDist") {
       camera.focalDist = std::stof(tokens[1]);
+    } else if (tokens[0] == "ApertureMask") {
+      if (tokens[1] != "Null") {
+        std::cout << "\t\t[Aperture mask use texture " << tokens[1] << "]"
+                  << std::endl;
+        apertureMaskTexId = addTexture(tokens[1]);
+      }
     } else if (tokens[0] == "Sample") {
       state.iterations = std::stoi(tokens[1]);
     } else if (tokens[0] == "Depth") {
@@ -331,9 +353,9 @@ void Scene::loadCamera() {
     if (tokens[0] == "Eye") {
       camera.position = glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
                                   std::stof(tokens[3]));
-    } else if (tokens[0] == "LookAt") {
-      camera.lookAt = glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
-                                std::stof(tokens[3]));
+    } else if (tokens[0] == "Rotation") {
+      camera.rotation = glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
+                                  std::stof(tokens[3]));
     } else if (tokens[0] == "Up") {
       camera.up = glm::vec3(std::stof(tokens[1]), std::stof(tokens[2]),
                             std::stof(tokens[3]));
@@ -349,11 +371,7 @@ void Scene::loadCamera() {
   camera.fov = glm::vec2(fovx, fovy);
   camera.tanFovY = glm::tan(glm::radians(fovy * 0.5f));
 
-  camera.right = glm::normalize(glm::cross(camera.view, camera.up));
-  camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
-                                 2 * yscaled / (float)camera.resolution.y);
-
-  camera.view = glm::normalize(camera.lookAt - camera.position);
+  camera.update();
 
   // set up render camera stuff
   int arraylen = camera.resolution.x * camera.resolution.y;
@@ -361,24 +379,6 @@ void Scene::loadCamera() {
   std::fill(state.image.begin(), state.image.end(), glm::vec3());
 
   cout << "Loaded camera!" << endl;
-}
-
-void Scene::loadEnvMap(const std::string &filename) {
-  envMapTexId = addTexture(filename);
-  auto envMap = textures[envMapTexId];
-  std::vector<float> pdf(envMap->width() * envMap->height());
-
-  for (int i = 0; i < envMap->height(); i++) {
-    for (int j = 0; j < envMap->width(); j++) {
-      int idx = i * envMap->width() + j;
-      pdf[idx] = Math::luminance(envMap->data()[idx]) *
-                 glm::sin((0.5f + i) / envMap->height() * PI);
-    }
-  }
-  envMapSampler = DiscreteSampler1D<float>(pdf);
-  std::cout << "\t[Environment Map width = " << envMap->width()
-            << ", height = " << envMap->height()
-            << ", sumPower = " << envMapSampler.sum << "]" << std::endl;
 }
 
 int Scene::addMaterial(const Material &material) {
@@ -422,9 +422,21 @@ void Scene::loadMaterial(const std::string &materialId) {
         std::cout << "baseColorMapId: " << material.baseColorMapId << std::endl;
       }
     } else if (tokens[0] == "Metallic") {
-      material.metallic = std::stof(tokens[1]);
+      if (std::isdigit(tokens[1][tokens[1].length() - 1])) {
+        material.metallic = std::stof(tokens[1]);
+      } else {
+        material.metallicMapId = addTexture(tokens[1]);
+        std::cout << "\t\t[Metallic use texture " << tokens[1] << "]"
+                  << std::endl;
+      }
     } else if (tokens[0] == "Roughness") {
-      material.roughness = std::stof(tokens[1]);
+      if (std::isdigit(tokens[1][tokens[1].length() - 1])) {
+        material.roughness = std::stof(tokens[1]);
+      } else {
+        material.roughnessMapId = addTexture(tokens[1]);
+        std::cout << "\t\t[Roughness use texture " << tokens[1] << "]"
+                  << std::endl;
+      }
     } else if (tokens[0] == "Ior") {
       material.ior = std::stof(tokens[1]);
     } else if (tokens[0] == "NormalMap") {
@@ -508,6 +520,7 @@ void DevScene::create(const Scene &scene) {
   cudaMalloc(&lightUnitRadiance, byteSizeOf(scene.lightUnitRadiance));
   cudaMemcpyHostToDev(lightUnitRadiance, scene.lightUnitRadiance.data(),
                       byteSizeOf(scene.lightUnitRadiance));
+  checkCUDAError("DevScene::meshData");
 
   lightSampler.create(scene.lightSampler);
   sumLightPowerInv = 1.f / scene.lightSampler.sum;
@@ -516,7 +529,21 @@ void DevScene::create(const Scene &scene) {
     envMap = textures + scene.envMapTexId;
     envMapSampler.create(scene.envMapSampler);
   }
-  checkCUDAError("DevScene::meshData");
+
+  if (scene.apertureMaskTexId != NullTextureId) {
+    apertureMask = textures + scene.apertureMaskTexId;
+    apertureSampler.create(scene.apertureSampler);
+  }
+
+#if SAMPLER_USE_SOBOL
+  std::ifstream sobolFile("sobol_10k_200.bin", std::ios::in | std::ios::binary);
+  std::vector<char> sobolData(SobolSampleNum * SobolSampleDim *
+                              sizeof(uint32_t));
+  sobolFile.read(sobolData.data(), byteSizeOf(sobolData));
+  cudaMalloc(&sampleSequence, byteSizeOf(sobolData));
+  cudaMemcpyHostToDev(sampleSequence, sobolData.data(), byteSizeOf(sobolData));
+#endif
+  checkCUDAError("DevScene::samplers");
 }
 
 void DevScene::destroy() {
@@ -537,4 +564,7 @@ void DevScene::destroy() {
   cudaSafeFree(lightUnitRadiance);
   lightSampler.destroy();
   envMapSampler.destroy();
+  apertureSampler.destroy();
+
+  cudaSafeFree(sampleSequence);
 }

@@ -119,8 +119,17 @@ void pathTraceFree() {
 /**
  * Antialiasing and physically based camera (lens effect)
  */
-__device__ Ray sampleCamera(const Camera &cam, int x, int y, glm::vec4 r) {
+__device__ Ray sampleCamera(DevScene *scene, const Camera &cam, int x, int y,
+                            glm::vec4 r) {
   Ray ray;
+#if CAMERA_PANORAMA
+  float u = (x - .5f + r.x) / cam.resolution.x - .5f;
+  float v = (y - .5f + r.y) / cam.resolution.y;
+  glm::vec3 dir = Math::toSphere(glm::vec2(u, v));
+  dir = cam.right * dir.x + cam.up * dir.y + cam.view * dir.z;
+  ray.direction = dir;
+  ray.origin = cam.position;
+#else
   float aspect = float(cam.resolution.x) / cam.resolution.y;
   float tanFovY = glm::tan(glm::radians(cam.fov.y));
   glm::vec2 pixelSize = 1.f / glm::vec2(cam.resolution);
@@ -128,13 +137,24 @@ __device__ Ray sampleCamera(const Camera &cam, int x, int y, glm::vec4 r) {
   glm::vec2 ruv = scr + pixelSize * glm::vec2(r.x, r.y);
   ruv = 1.f - ruv * 2.f;
 
-  glm::vec3 pLens =
-      glm::vec3(Math::concentricSampleDisk(r.z, r.w) * cam.lensRadius, 0.f);
+  glm::vec2 pAperture;
+  if (scene->apertureMask != nullptr) {
+    int id = scene->apertureSampler.sample(r.z, r.w);
+    pAperture.x = glm::fract((id + .5f) / scene->apertureMask->width);
+    pAperture.y =
+        (id / scene->apertureMask->width + .5f) / scene->apertureMask->height;
+    pAperture = pAperture * 2.f - 1.f;
+  } else {
+    pAperture = Math::concentricSampleDisk(r.z, r.w);
+  }
+
+  glm::vec3 pLens = glm::vec3(pAperture * cam.lensRadius, 0.f);
   glm::vec3 pFocus =
       glm::vec3(ruv * glm::vec2(aspect, 1.f) * tanFovY, 1.f) * cam.focalDist;
   glm::vec3 dir = pFocus - pLens;
   ray.direction = glm::normalize(glm::mat3(cam.right, cam.up, cam.view) * dir);
   ray.origin = cam.position + cam.right * pLens.x + cam.up * pLens.y;
+#endif
   return ray;
 }
 
@@ -146,7 +166,8 @@ __device__ Ray sampleCamera(const Camera &cam, int x, int y, glm::vec4 r) {
  * motion blur - jitter rays "in time"
  * lens effect - jitter ray origin positions based on a lens
  */
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth,
+__global__ void generateRayFromCamera(DevScene *scene, Camera cam, int iter,
+                                      int traceDepth,
                                       PathSegment *pathSegments) {
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -156,9 +177,10 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth,
 
     PathSegment &segment = pathSegments[index];
 
-    thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+    Sampler rng =
+        makeSeededRandomEngine(iter, index, traceDepth, scene->sampleSequence);
 
-    segment.ray = sampleCamera(cam, x, y, sample4D(rng));
+    segment.ray = sampleCamera(scene, cam, x, y, sample4D(rng));
     segment.throughput = glm::vec3(1.f);
     segment.radiance = glm::vec3(0.f);
 
@@ -176,9 +198,9 @@ __global__ void previewGBuffer(int iter, DevScene *scene, Camera cam,
     return;
   }
   int index = y * width + x;
-  thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+  Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
-  Ray ray = sampleCamera(cam, x, y, sample4D(rng));
+  Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
   Intersection intersec;
   scene->intersect(ray, intersec);
 
@@ -247,7 +269,7 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
                                        Intersection *intersections,
                                        DevScene *scene, int numPaths,
                                        bool sortMaterial) {
-  const int SamplesConsumedOneIter = 10;
+  const int SamplesConsumedOneIter = 7;
 
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -285,8 +307,8 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
     return;
   }
 
-  thrust::default_random_engine rng =
-      makeSeededRandomEngine(iter, idx, 4 + depth * SamplesConsumedOneIter);
+  Sampler rng = makeSeededRandomEngine(
+      iter, idx, 4 + depth * SamplesConsumedOneIter, scene->sampleSequence);
 
   Material material = scene->getTexturedMaterialAndSurface(intersec);
 
@@ -338,6 +360,8 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
     if (sample.type == BSDFSampleType::Invalid) {
       // Terminate path if sampling fails
       segment.remainingBounces = 0;
+    } else if (sample.pdf < 1e-8f) {
+      segment.remainingBounces = 0;
     } else {
       bool deltaSample = (sample.type & BSDFSampleType::Specular);
       segment.throughput *=
@@ -382,9 +406,9 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
   glm::vec3 accRadiance(0.f);
 
   int index = y * width + x;
-  thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+  Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
 
-  Ray ray = sampleCamera(cam, x, y, sample4D(rng));
+  Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
 
   Intersection intersec;
   scene->intersect(ray, intersec);
@@ -437,6 +461,8 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
 
     if (sample.type == BSDFSampleType::Invalid) {
       // terminate path if sampling fails
+      break;
+    } else if (sample.pdf < 1e-8f) {
       break;
     }
 
@@ -505,8 +531,8 @@ __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
   }
   int index = y * width + x;
 
-  thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
-  Ray ray = sampleCamera(cam, x, y, sample4D(rng));
+  Sampler rng = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
+  Ray ray = sampleCamera(scene, cam, x, y, sample4D(rng));
 
   Intersection intersec;
   scene->visualizedIntersect(ray, intersec);
@@ -548,7 +574,7 @@ void pathTrace(uchar4 *pbo, int frame, int iter) {
       (cam.resolution.y + blockSize2D.y - 1) / blockSize2D.y);
 
   generateRayFromCamera<<<blocksPerGrid2D, blockSize2D>>>(
-      cam, iter, Settings::traceDepth, devPaths);
+      hstScene->devScene, cam, iter, Settings::traceDepth, devPaths);
   checkCUDAError("PT::generateRayFromCamera");
   cudaDeviceSynchronize();
 

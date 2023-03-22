@@ -20,9 +20,22 @@ struct Ray {
 };
 
 struct Camera {
+  void update() {
+    float yaw = glm::radians(rotation.x);
+    float pitch = glm::radians(rotation.y);
+    float roll = glm::radians(rotation.z);
+    view.x = glm::cos(yaw) * glm::cos(pitch);
+    view.z = glm::sin(yaw) * glm::cos(pitch);
+    view.y = glm::sin(pitch) * glm::cos(roll);
+
+    view = glm::normalize(view);
+    right = glm::normalize(glm::cross(view, glm::vec3(0, 1, 0)));
+    up = glm::normalize(glm::cross(right, view));
+  }
+
   glm::ivec2 resolution;
   glm::vec3 position;
-  glm::vec3 lookAt;
+  glm::vec3 rotation;
   glm::vec3 view;
   glm::vec3 up;
   glm::vec3 right;

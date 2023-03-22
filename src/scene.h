@@ -37,10 +37,6 @@ struct MeshData {
   std::vector<glm::vec3> vertices;
   std::vector<glm::vec3> normals;
   std::vector<glm::vec2> texcoords;
-
-#if MESH_DATA_INDEXED
-  std::vector<glm::ivec3> indices;
-#endif
 };
 
 struct ModelInstance {
@@ -79,6 +75,14 @@ struct DevScene {
     Material mat = materials[intersec.matId];
     if (mat.baseColorMapId > NullTextureId) {
       mat.baseColor = textures[mat.baseColorMapId].linearSample(intersec.uv);
+    }
+
+    if (mat.metallicMapId > NullTextureId) {
+      mat.metallic = textures[mat.metallicMapId].linearSample(intersec.uv).r;
+    }
+
+    if (mat.roughnessMapId > NullTextureId) {
+      mat.roughness = textures[mat.roughnessMapId].linearSample(intersec.uv).r;
     }
 
     if (mat.normalMapId > NullTextureId) {
@@ -434,6 +438,11 @@ struct DevScene {
   DevDiscreteSampler1D<float> lightSampler;
   DevTextureObj *envMap = nullptr;
   DevDiscreteSampler1D<float> envMapSampler;
+
+  DevTextureObj *apertureMask = nullptr;
+  DevDiscreteSampler1D<float> apertureSampler;
+
+  uint32_t *sampleSequence = nullptr;
 };
 
 class Scene {
@@ -449,10 +458,11 @@ public:
 private:
   void createLightSampler();
 
+  void createApertureSampler();
+
   void loadModel(const std::string &objectId);
   void loadMaterial(const std::string &materialId);
   void loadCamera();
-  void loadEnvMap(const std::string &filename);
 
   int addMaterial(const Material &material);
   int addTexture(const std::string &filename);
@@ -481,6 +491,9 @@ public:
   int numLightPrims = 0;
   DiscreteSampler1D<float> envMapSampler;
   int envMapTexId = NullTextureId;
+
+  DiscreteSampler1D<float> apertureSampler;
+  int apertureMaskTexId = NullTextureId;
 
   DevScene hstScene;
   DevScene *devScene = nullptr;
