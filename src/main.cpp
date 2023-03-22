@@ -73,16 +73,16 @@ void testTriangle() {
             << vec3ToString(glm::vec3(1.f - bary.x - bary.y, bary)) << "\n";
 }
 
-void testDiscreteSampler() {
+void testDiscreteSampler1D() {
   std::vector<float> distrib = {.1f, .2f, .3f, .4f, 2.f, 3.f, 4.f};
 
-  DiscreteSampler<float> sampler(distrib);
+  DiscreteSampler1D<float> sampler(distrib);
 
   int stats[7] = {0, 0, 0, 0, 0, 0, 0};
 
   thrust::default_random_engine rng(time(nullptr));
 
-  for (int i = 0; i < 100000; i++) {
+  for (int i = 0; i < 1000000; i++) {
     float r1 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
     float r2 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
     stats[sampler.sample(r1, r2)]++;
@@ -90,6 +90,48 @@ void testDiscreteSampler() {
 
   for (auto i : stats) {
     std::cout << i << " ";
+  }
+  std::cout << "\n";
+}
+
+void testDiscreteSampler2D() {
+  std::vector<float> distrib = {.1f, .2f, .3f,  .4f,  2.f, 3.f,  4.f,
+                                .2f, .4f, .6f,  .8f,  4.f, 6.f,  8.f,
+                                .3f, .6f, .9f,  1.2f, 6.f, 9.f,  12.f,
+                                .4f, .8f, 1.2f, 1.6f, 8.f, 12.f, 16.f};
+
+  DiscreteSampler2D<float> sampler(distrib.data(), 7, 4);
+
+  int stats[4][7] = {{0}};
+  int statsRow[4] = {0};
+  int statsCol[7] = {0};
+  thrust::default_random_engine rng(time(nullptr));
+
+  for (int i = 0; i < 1000000; i++) {
+    float r1 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+    float r2 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+    float r3 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+    float r4 = thrust::uniform_real_distribution<float>(0.f, 1.f)(rng);
+
+    auto pos = sampler.sample(r1, r2, r3, r4);
+    stats[pos.first][pos.second]++;
+    statsRow[pos.first]++;
+    statsCol[pos.second]++;
+  }
+
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 7; j++) {
+      std::cout << std::setw(4) << stats[i][j] << " ";
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\n";
+  for (int i = 0; i < 7; i++) {
+    std::cout << std::setw(4) << statsCol[i] << " ";
+  }
+  std::cout << "\n";
+  for (int i = 0; i < 4; i++) {
+    std::cout << std::setw(4) << statsRow[i] << " ";
   }
   std::cout << "\n";
 }
@@ -113,7 +155,7 @@ int main(int argc, char **argv) {
   // Set up camera stuff from loaded path tracer settings
   iteration = 0;
   renderState = &scene->state;
-  Camera &cam = renderState->camera;
+  Camera &cam = scene->camera;
   width = cam.resolution.x;
   height = cam.resolution.y;
 
@@ -187,7 +229,7 @@ void saveImage() {
 void runCuda() {
   if (State::camChanged) {
     iteration = 0;
-    Camera &cam = renderState->camera;
+    Camera &cam = scene->camera;
     cameraPosition.x = zoom * sin(phi) * sin(theta);
     cameraPosition.y = zoom * cos(theta);
     cameraPosition.z = zoom * cos(phi) * sin(theta);
@@ -234,7 +276,7 @@ void runCuda() {
 
 void keyCallback(GLFWwindow *window, int key, int scancode, int action,
                  int mods) {
-  Camera &cam = renderState->camera;
+  Camera &cam = scene->camera;
 
   if (action == GLFW_PRESS) {
     switch (key) {
@@ -281,7 +323,7 @@ void mouseButtonCallback(GLFWwindow *window, int button, int action, int mods) {
 }
 
 void mousePositionCallback(GLFWwindow *window, double xpos, double ypos) {
-  Camera &cam = renderState->camera;
+  Camera &cam = scene->camera;
 
   if (xpos == lastX || ypos == lastY)
     return; // otherwise, clicking back into window causes re-start

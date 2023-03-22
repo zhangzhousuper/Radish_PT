@@ -39,7 +39,6 @@ struct PrevBSDFSampleInfo {
 };
 
 struct RenderState {
-  Camera camera;
   unsigned int iterations;
   std::vector<glm::vec3> image;
   std::string imageName;

@@ -248,6 +248,31 @@ void RenderImGui() {
     ImGui::End();
   }
 
+  ImGui::Begin("Camera");
+  {
+    auto &cam = scene->camera;
+
+    glm::vec3 lastPos = cam.position;
+    if (ImGui::DragFloat3("Position", glm::value_ptr(cam.position), .1f)) {
+      cam.lookAt += cam.position - lastPos;
+      State::camChanged = true;
+    }
+
+    if (ImGui::SliderFloat("FOV", &cam.fov.y, .1f, 45.f, "%.1f deg")) {
+      State::camChanged = true;
+    }
+
+    if (ImGui::DragFloat("Apature", &cam.lensRadius, .01f, 0.f, 3.f)) {
+      State::camChanged = true;
+    }
+    if (ImGui::DragFloat("Focal", &cam.focalDist, .1f, 0.f, FLT_MAX,
+                         "%.1f m")) {
+      State::camChanged = true;
+    }
+
+    ImGui::End();
+  }
+
   ImGui::Render();
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

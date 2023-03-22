@@ -41,14 +41,14 @@ struct DevTextureObj {
   }
 
   __device__ glm::vec3 linearSample(glm::vec2 uv) {
-    const float eps = FLT_MIN * 2.f;
+    const float eps = FLT_MIN;
     uv = glm::fract(uv);
 
-    float fx = uv.x * (width - eps);
-    float fy = uv.y * (height - eps);
+    float fx = uv.x * (width - eps) + 0.5f;
+    float fy = uv.y * (height - eps) + 0.5f;
 
-    int ix = glm::fract(fx) < 0.5f ? int(fx) : int(fx) - 1;
-    int iy = glm::fract(fy) < 0.5f ? int(fy) : int(fy) - 1;
+    int ix = glm::fract(fx) > 0.5f ? fx : fx - 1;
+    int iy = glm::fract(fy) > 0.5f ? fy : fy - 1;
     if (ix < 0)
       ix += width;
     if (iy < 0)

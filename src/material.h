@@ -117,8 +117,8 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha,
 
   glm::vec3 h =
       t * p.x + b * p.y + vh * glm::sqrt(glm::max(0.f, 1.f - glm::dot(p, p)));
-  h = glm::normalize(glm::vec3(h.x * alpha, h.y * alpha, glm::max(0.f, h.z)));
-  return transMat * h;
+  h = glm::vec3(h.x * alpha, h.y * alpha, glm::max(0.f, h.z));
+  return glm::normalize(transMat * h);
 }
 
 struct Material {

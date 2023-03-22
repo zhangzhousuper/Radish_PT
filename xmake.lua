@@ -39,6 +39,6 @@ target("cuda_pt")
     add_packages("glew","glm", "stb", "imgui")
 
     set_rundir("$(projectdir)/scenes")
-    set_runargs("cornell.txt")
+    set_runargs("scene.txt")
 
 target_end()
