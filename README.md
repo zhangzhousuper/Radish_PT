@@ -1,4 +1,4 @@
-#Radish
+##Radish
 Radish is a PathTracer implemented by CUDA and OpenGL
 
 ## Gallery
