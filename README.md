@@ -24,8 +24,10 @@ Radish is a PathTracer implemented by CUDA and OpenGL
 ![](./img/normals.png)
 <p align="center">normal visualization</p>
 
-![](./img/bvh1.png) |
-<p align="center">BVH visualization of large scenes</p>
+| Scene                     | BVH                 |
+| --------------------------- | ----------------------- |
+| ![](./img/bvh.png) | ![](./img/bvh1.png) |
+
 
 ## Reference
 --------
