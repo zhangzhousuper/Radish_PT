@@ -394,8 +394,10 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
       accRadiance += radiance * segment.throughput;
     } else {
       float lightPdf = Math::pdfAreaToSolidAngle(
-          Math::luminance(radiance) * scene->sumLightPowerInv, intersec.prevPos,
-          intersec.pos, intersec.norm);
+          Math::luminance(radiance) * 2.f * PI *
+              scene->getPrimitiveArea(intersec.primId) *
+              scene->sumLightPowerInv,
+          intersec.prevPos, intersec.pos, intersec.norm);
       float BSDFPdf = prev.BSDFPdf;
 
       accRadiance += radiance * segment.throughput *
@@ -574,14 +576,14 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
 
       glm::vec3 radiance = material.baseColor;
 
+      float lightPdf = Math::pdfAreaToSolidAngle(
+          Math::luminance(radiance) * 2.f * PI *
+              scene->getPrimitiveArea(intersec.primId) *
+              scene->sumLightPowerInv,
+          curPos, intersec.pos, intersec.norm);
+
       float weight =
-          deltaSample
-              ? 1.f
-              : Math::powerHeuristic(
-                    sample.pdf,
-                    Math::pdfAreaToSolidAngle(
-                        Math::luminance(radiance) * scene->sumLightPowerInv,
-                        curPos, intersec.pos, intersec.norm));
+          deltaSample ? 1.f : Math::powerHeuristic(sample.pdf, lightPdf);
       accRadiance += throughput * radiance * weight;
 
       break;
