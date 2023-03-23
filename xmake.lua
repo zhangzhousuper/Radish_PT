@@ -22,7 +22,7 @@ if is_host("windows") then
     add_cxflags("/execution-charset:utf-8", "/source-charset:utf-8", {tools = "cl"})
 end
 
-add_requires("glew","glm", "stb")
+add_requires("glew","glm", "stb","tinygltf")
 add_requires("imgui", {configs = {glfw_opengl3 = true}})
 
 -- dynamic link
@@ -36,7 +36,7 @@ target("cuda_pt")
     -- add_includedirs("external/include")
     
 
-    add_packages("glew","glm", "stb", "imgui")
+    add_packages("glew","glm", "stb", "imgui","tinygltf")
 
     set_rundir("$(projectdir)/scenes")
     set_runargs("scene.txt")

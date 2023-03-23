@@ -70,6 +70,9 @@ MeshData *Resource::loadGLTFMesh(const std::string &filename) {
     return find->second;
   }
   auto model = new MeshData;
+
+  // tinygltf::Model gltfModel;
+  // tinygltf::TinyGLTF gltfContext;
 }
 
 MeshData *Resource::loadModelMeshData(const std::string &filename) {

@@ -289,8 +289,8 @@ void mainLoop() {
 
     runCuda();
 
-    string title = "CIS565 Path Tracer | " +
-                   utilityCore::convertIntToString(iteration) + " Iterations";
+    string title = "Radish | " + utilityCore::convertIntToString(iteration) +
+                   " Iterations";
     glfwSetWindowTitle(window, title.c_str());
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBindTexture(GL_TEXTURE_2D, displayImage);
