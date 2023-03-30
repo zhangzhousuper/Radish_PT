@@ -30,11 +30,14 @@ __host__ __device__ static bool intersectTriangle(Ray ray, glm::vec3 v0,
   float det = glm::dot(e01, pvec);
 
   if (glm::abs(det) < FLT_EPSILON) {
+    // because the ray is parallel to the triangle.
     return false;
   }
 
   glm::vec3 v0ToOri = ori - v0;
 
+  // the determinant needs to be positive for the barycentric coordinates to be
+  // valid.
   if (det < 0.f) {
     det = -det;
     v0ToOri = -v0ToOri;
@@ -43,6 +46,9 @@ __host__ __device__ static bool intersectTriangle(Ray ray, glm::vec3 v0,
   bary.x = glm::dot(v0ToOri, pvec);
 
   if (bary.x < 0.f || bary.x > det) {
+    // . If bary.x is outside the range [0, det] (where det is the determinant),
+    // the function returns false because the intersection point is outside the
+    // triangle.
     return false;
   }
 
@@ -54,7 +60,9 @@ __host__ __device__ static bool intersectTriangle(Ray ray, glm::vec3 v0,
   }
 
   float invDet = 1.f / det;
-  bary *= invDet;
+  bary *= invDet; //  get the barycentric coordinates.
   dist = glm::dot(e02, qvec) * invDet;
+  // If dist is negative, the intersection point is behind the ray origin and
+  // the function returns false.
   return dist > 0.f;
 }

@@ -126,7 +126,7 @@ struct Material {
   enum Type { Lambertian, MetallicWorkflow, Dielectric, Disney, Light };
 
   __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
-    return baseColor * INV_PI;
+    return baseColor * INV_PI; // 1/pi for energy conservation
   }
 
   __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {

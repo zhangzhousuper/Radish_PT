@@ -12,18 +12,10 @@
 #include <iostream>
 #include <sstream>
 #include <stdlib.h>
-#include <string>
 
-#include "sceneStructs.h"
-
-#include "image.h"
-
-#include "pathtrace.h"
-
-#include "mathUtil.h"
 #include "scene.h"
-#include "utilities.h"
 
+#include "denoiser.h"
 using namespace std;
 
 //-------------------------------
@@ -31,10 +23,12 @@ using namespace std;
 //-------------------------------
 
 extern Scene *scene;
-extern int iteration;
+extern int    iteration;
 
 extern int width;
 extern int height;
+
+extern LeveledEAWFilter EAWFilter;
 
 void runCuda();
 void keyCallback(GLFWwindow *window, int key, int scancode, int action,

@@ -44,9 +44,11 @@ struct DevTextureObj {
     const float eps = FLT_MIN;
     uv = glm::fract(uv);
 
+    // float part
     float fx = uv.x * (width - eps) + 0.5f;
     float fy = uv.y * (height - eps) + 0.5f;
 
+    // integer part
     int ix = glm::fract(fx) > 0.5f ? fx : fx - 1;
     int iy = glm::fract(fy) > 0.5f ? fy : fy - 1;
     if (ix < 0)

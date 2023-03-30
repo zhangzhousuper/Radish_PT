@@ -8,4 +8,10 @@
 void InitDataContainer(GuiDataContainer *guiData);
 void pathTraceInit(Scene *scene);
 void pathTraceFree();
-void pathTrace(uchar4 *pbo, int frame, int iteration);
+void pathTrace(glm::vec3 *DirectIllum, glm::vec3 *IndirectIllum);
+
+void copyImageToPBO(uchar4 *devPBO, glm::vec3 *devImage, int width, int height,
+                    int toneMapping);
+void copyImageToPBO(uchar4 *devPBO, glm::vec2 *devImage, int width, int height);
+void copyImageToPBO(uchar4 *devPBO, float *devImage, int width, int height);
+void copyImageToPBO(uchar4 *devPBO, int *devImage, int width, int height);

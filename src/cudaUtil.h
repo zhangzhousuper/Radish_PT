@@ -33,6 +33,12 @@ static void checkCUDAErrorFn(const char *msg, const char *file, int line) {
 #endif
 }
 
+template <typename T> T *cudaMalloc(size_t numElements) {
+  T *devPtr;
+  cudaMalloc(&devPtr, sizeof(T) * numElements);
+  return devPtr;
+}
+
 template <typename T> void cudaSafeFree(T *&ptr) {
   if (ptr != nullptr) {
     cudaFree(ptr);

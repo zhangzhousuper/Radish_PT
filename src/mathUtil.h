@@ -24,6 +24,8 @@ static std::string vec3ToString(const glm::vec3 &vec) {
   return ss.str();
 }
 
+__host__ __device__ inline int ceilDiv(int x, int y) { return (x + y - 1) / y; }
+
 namespace Math {
 bool epsilonCheck(float a, float b);
 
@@ -108,7 +110,7 @@ __device__ static glm::vec3 toSphere(glm::vec2 v) {
   return glm::vec3(glm::cos(v.x) * glm::sin(v.y), glm::cos(v.y),
                    glm::sin(v.x) * glm::sin(v.y));
 }
-
+//  Blinn-Newell hemisphere mapping
 __device__ static glm::vec2 toPlane(glm::vec3 v) {
   return glm::vec2(glm::fract(glm::atan(v.z, v.x) * INV_PI * 0.5f + 1.f),
                    glm::atan(glm::length(glm::vec2(v.x, v.z)), v.y) * INV_PI);
