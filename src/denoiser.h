@@ -13,6 +13,12 @@
 #include "scene.h"
 
 struct GBuffer {
+#if DENOISER_ENCODE_NORMAL
+    using NormT = glm::vec2;
+#else
+    using NormT = glm::vec3;
+#endif
+
     GBuffer() = default;
 
     void create(int width, int height);
@@ -20,36 +26,48 @@ struct GBuffer {
     void render(DevScene *scene, const Camera &cam);
     void update(const Camera &cam);
 
-    __device__ glm::vec3 *getNormal() {
+    __device__ NormT *getNormal() {
         return normal[frameIdx];
+    }
+    __device__ NormT *lastNormal() {
+        return normal[frameIdx ^ 1];
     }
     __device__ int *getPrimId() {
         return primId[frameIdx];
     }
-    __device__ float *getDepth() {
-        return depth[frameIdx];
-    }
-
-    __device__ glm::vec3 *lastNormal() {
-        return normal[frameIdx ^ 1];
-    }
-
     __device__ int *lastPrimId() {
         return primId[frameIdx ^ 1];
     }
 
+#if DENOISER_ENCODE_POSITION
+    __device__ float *getDepth() {
+        return depth[frameIdx];
+    }
     __device__ float *lastDepth() {
         return depth[frameIdx ^ 1];
     }
+#else
+    __device__ glm::vec3 *getPos() {
+        return position[frameIdx];
+    }
+    __device__ glm::vec3 *lastPos() {
+        return position[frameIdx ^ 1];
+    }
+#endif
 
     glm::vec3 *albedo    = nullptr;
-    glm::vec3 *normal[2] = {nullptr};
+    NormT     *normal[2] = {nullptr};
 #if FLOAT_MOTION_BUFFER
     glm::vec2 *motion = nullptr;
 #else
-    int *motion = nullptr;
+    int       *motion      = nullptr;
 #endif
-    float *depth[2]  = {nullptr};
+
+#if DENOISER_ENCODE_POSITION
+    float *depth[2] = {nullptr};
+#else
+    glm::vec3 *position[2] = {nullptr};
+#endif
     int   *primId[2] = {nullptr};
     int    frameIdx  = 0;
     Camera lastCam;

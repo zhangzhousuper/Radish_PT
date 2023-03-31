@@ -521,6 +521,8 @@ WriteRadiance:
     if (Math::hasNanOrInf(indirect)) {
         indirect = glm::vec3(0.f);
     }
+    direct               = Math::HDRToLDR(direct);
+    indirect             = Math::HDRToLDR(indirect);
     directIllum[index]   = (directIllum[index] * float(iter) + direct / DENOISE_COMPRESS) / float(iter + 1);
     indirectIllum[index] = (indirectIllum[index] * float(iter) + indirect / DENOISE_COMPRESS) / float(iter + 1);
 }

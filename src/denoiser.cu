@@ -2,10 +2,24 @@
 #include "glm/fwd.hpp"
 #include <cuda_device_runtime_api.h>
 
-__device__ constexpr float Gaussian3x3[] = {
-    .25f, .5f, .25f};
+__device__ constexpr float Gaussian3x3[3][3] = {
+    {.075f, .124f, .075f},
+    {.124f, .204f, .124f},
+    {.075f, .124f, .075f}};
 
-__device__ constexpr float Gaussian5x5[] = {.0625f, .25f, .375f, .25f, .0625f};
+__device__ constexpr float Gaussian5x5[5][5] = {
+    {.0030f, .0133f, .0219f, .0133f, .0030f},
+    {.0133f, .0596f, .0983f, .0596f, .0133f},
+    {.0219f, .0983f, .1621f, .0983f, .0219f},
+    {.0133f, .0596f, .0983f, .0596f, .0133f},
+    {.0030f, .0133f, .0219f, .0133f, .0030f}};
+#if DENOISER_ENCODE_NORMAL
+#define ENCODE_NORM(x) Math::encodeNormalHemiOct32(x)
+#define DECODE_NORM(x) Math::decodeNormalHemiOct32(x)
+#else
+#define ENCODE_NORM(x) x
+#define DECODE_NORM(x) x
+#endif
 
 __global__ void renderGBuffer(DevScene *scene, Camera cam,
                               GBuffer gBuffer) {
@@ -49,10 +63,13 @@ __global__ void renderGBuffer(DevScene *scene, Camera cam,
         Material material = scene->getTexturedMaterialAndSurface(intersect);
 
         gBuffer.albedo[idx]      = material.baseColor;
-        gBuffer.getNormal()[idx] = intersect.norm;
+        gBuffer.getNormal()[idx] = ENCODE_NORM(intersect.norm);
         gBuffer.getPrimId()[idx] = matId;
-        gBuffer.getDepth()[idx]  = glm::distance(intersect.pos, ray.origin);
-
+#if DENOISER_ENCODE_POSITION
+        gBuffer.getDepth()[idx] = glm::distance(intersect.pos, ray.origin);
+#else
+        gBuffer.getPos()[idx] = intersect.pos;
+#endif
         glm::ivec2 lastPos = gBuffer.lastCam.getRasterCoord(intersect.pos);
         if (lastPos.x >= 0 && lastPos.x < gBuffer.width && lastPos.y >= 0 && lastPos.y < gBuffer.height) {
             gBuffer.motion[idx] = lastPos.y * cam.resolution.x + lastPos.x;
@@ -66,28 +83,22 @@ __global__ void renderGBuffer(DevScene *scene, Camera cam,
             albedo       = scene->envMap->linearSample(uv);
         }
         gBuffer.albedo[idx]      = albedo;
-        gBuffer.getNormal()[idx] = glm::vec3(0.f);
+        gBuffer.getNormal()[idx] = GBuffer::NormT(0.f);
         gBuffer.getPrimId()[idx] = NullPrimitive;
-        gBuffer.getDepth()[idx]  = 1.f;
-        gBuffer.motion[idx]      = 0;
+#if DENOISER_ENCODE_POSITION
+        gBuffer.getDepth()[idx] = 1.f;
+#else
+        gBuffer.getPos()[idx] = glm::vec3(0.f);
+#endif
+        gBuffer.motion[idx] = 0;
     }
 }
 
-__device__ float weightLuminance(glm::vec3 *color, int p, int q) {
-    return 0.f;
-}
-
-__device__ float weightLuminance(glm::vec4 *colorVar, int p, int q) {
-    return 0.f;
-}
-
-__device__ float weightNormal(const GBuffer &gBuffer, int p, int q) {
-}
-
-__global__ void waveletFilter(glm::vec3 *colorOut,
-                              glm::vec3 *colorIn, GBuffer gBuffer, float sigDepth,
-                              float sigNormal, float sigLuminance, Camera cam,
-                              int level) {
+__global__ void
+    waveletFilter(glm::vec3 *colorOut,
+                  glm::vec3 *colorIn, GBuffer gBuffer, float sigDepth,
+                  float sigNormal, float sigLuminance, Camera cam,
+                  int level) {
     int step = 1 << level;
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -105,9 +116,13 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
     }
 
     glm::vec3 colorP  = colorIn[idxP];
-    glm::vec3 normalP = gBuffer.getNormal()[idxP];
-    glm::vec3 posP    = cam.getPosition(x, y, gBuffer.getDepth()[idxP]);
-
+    glm::vec3 normalP = DECODE_NORM(gBuffer.getNormal()[idxP]);
+    glm::vec3 posP =
+#if DENOISER_ENCODE_POSITION
+        cam.getPosition(x, y, gBuffer.getDepth()[idxP]);
+#else
+        gBuffer.getPos()[idxP];
+#endif
     glm::vec3 sum       = glm::vec3(0.f);
     float     weightSum = 0.f;
 
@@ -125,9 +140,14 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
             if (gBuffer.getPrimId()[idxQ] != primIdP) {
                 continue;
             }
-            glm::vec3 normalQ = gBuffer.getNormal()[idxQ];
-            glm::vec3 posQ    = cam.getPosition(qx, qy, gBuffer.getDepth()[idxQ]);
-            glm::vec3 colorQ  = colorIn[idxQ];
+            glm::vec3 normalQ = DECODE_NORM(gBuffer.getNormal()[idxQ]);
+            glm::vec3 posQ =
+#if DENOISER_ENCODE_POSITION
+                cam.getPosition(qx, qy, gBuffer.getDepth()[idxQ]);
+#else
+                gBuffer.getPos()[idxQ];
+#endif
+            glm::vec3 colorQ = colorIn[idxQ];
 
             float distColor2 = glm::dot(colorP - colorQ, colorP - colorQ);
             float wColor     = glm::min(1.f, glm::exp(-distColor2 / sigLuminance));
@@ -139,7 +159,7 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
             float wPos     = glm::min(1.f, glm::exp(-distPos2 / sigDepth));
 
             float weight =
-                wColor * wNormal * wPos * Gaussian5x5[i + 2] * Gaussian5x5[j + 2];
+                wColor * wNormal * wPos * Gaussian5x5[i + 2][j + 2];
             sum += colorQ * weight;
             weightSum += weight;
         }
@@ -174,9 +194,13 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
     }
 
     glm::vec3 colorP  = colorIn[idxP];
-    glm::vec3 normalP = gBuffer.getNormal()[idxP];
-    glm::vec3 posP    = cam.getPosition(x, y, gBuffer.getDepth()[idxP]);
-
+    glm::vec3 normalP = DECODE_NORM(gBuffer.getNormal()[idxP]);
+    glm::vec3 posP =
+#if DENOISER_ENCODE_POSITION
+        cam.getPosition(x, y, gBuffer.getDepth()[idxP]);
+#else
+        gBuffer.getPos()[idxP];
+#endif
     glm::vec3 colorSum    = glm::vec3(0.f);
     float     varianceSum = 0.f;
     float     weightSum   = 0.f;
@@ -193,20 +217,24 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
                 || qx < 0 || qy < 0) {
                 continue;
             }
-            glm::vec3 normalQ = gBuffer.getNormal()[idxQ];
-            glm::vec3 posQ    = cam.getPosition(qx, qy, gBuffer.getDepth()[idxQ]);
-            glm::vec3 colorQ  = colorIn[idxQ];
-            float     varQ    = varianceIn[idxQ];
+            glm::vec3 normalQ = DECODE_NORM(gBuffer.getNormal()[idxQ]);
+            glm::vec3 posQ =
+#if DENOISER_ENCODE_POSITION
+                cam.getPosition(qx, qy, gBuffer.getDepth()[idxQ]);
+#else
+                gBuffer.getPos()[idxQ];
+#endif
+            float     varQ   = varianceIn[idxQ];
+            glm::vec3 colorQ = colorIn[idxQ];
 
             float distPos2 = glm::dot(posP - posQ, posP - posQ);
-            float wPos     = glm::min(1.f, glm::exp(-distPos2 / sigDepth));
+            float wPos     = glm::exp(-distPos2 / sigDepth) + 1e-4f;
 
-            float wNormal = glm::pow(glm::max(0.f, glm::dot(normalP, normalQ)), sigNormal) + 1e-4f;
+            float wNormal = glm::pow(Math::satDot(normalP, normalQ), sigNormal) + 1e-4f;
+            float denom   = sigLuminance * glm::sqrt(glm::max(varFiltered[idxP], 0.f)) + 1e-4f;
+            float wColor  = glm::exp(-glm::abs(Math::luminance(colorP) - Math::luminance(colorQ)) / denom) + 1e-4f;
 
-            float denom  = sigLuminance * glm::sqrt(glm::max(varFiltered[idxP], 0.f)) + 1e-4f;
-            float wColor = glm::exp(-glm::abs(Math::luminance(colorP) - Math::luminance(colorQ)) / denom);
-
-            float weight  = wColor * wNormal * wPos * Gaussian5x5[i + 2] * Gaussian5x5[j + 2];
+            float weight  = wColor * wNormal * wPos * Gaussian5x5[i + 2][j + 2];
             float weight2 = weight * weight;
 
             colorSum += colorQ * weight;
@@ -215,8 +243,8 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
             weight2Sum += weight2;
         }
     }
-    colorOut[idxP]    = (weightSum == 0.f) ? colorIn[idxP] : colorSum / weightSum;
-    varianceOut[idxP] = (weight2Sum == 0.f) ? varianceIn[idxP] : varianceSum / weight2Sum;
+    colorOut[idxP]    = (weightSum <= FLT_EPSILON) ? colorIn[idxP] : colorSum / weightSum;
+    varianceOut[idxP] = (weight2Sum <= FLT_EPSILON) ? varianceIn[idxP] : varianceSum / weight2Sum;
 }
 
 __global__ void modulate(glm::vec3 *devImage, GBuffer gBuffer, int width,
@@ -226,7 +254,7 @@ __global__ void modulate(glm::vec3 *devImage, GBuffer gBuffer, int width,
     if (x < width && y < height) {
         int       idx   = x + y * width;
         glm::vec3 color = devImage[idx];
-        color *= DENOSIE_COMPRESS;
+        color           = Math::LDRToHDR(color);
         devImage[idx] *=
             glm::max(gBuffer.albedo[idx] - DEMODULATE_EPS, glm::vec3(0.f));
     }
@@ -275,8 +303,8 @@ __global__ void temporalAccumulate(glm::vec3 *colorAccumOut, glm::vec3 *colorAcc
     } else if (gBuffer.lastPrimId()[lastIdx] != primId) {
         diff = true;
     } else {
-        glm::vec3 normal     = gBuffer.getNormal()[idx];
-        glm::vec3 lastNormal = gBuffer.lastNormal()[lastIdx];
+        glm::vec3 normal     = DECODE_NORM(gBuffer.getNormal()[idx]);
+        glm::vec3 lastNormal = DECODE_NORM(gBuffer.lastNormal()[lastIdx]);
         if (glm::abs(glm::dot(normal, lastNormal)) < .1f) {
             diff = true;
         }
@@ -285,7 +313,7 @@ __global__ void temporalAccumulate(glm::vec3 *colorAccumOut, glm::vec3 *colorAcc
     glm::vec3 color      = colorIn[idx];
     glm::vec3 lastColor  = colorAccumIn[lastIdx];
     glm::vec3 lastMoment = momentAccumIn[lastIdx];
-    float     lum        = Math::luminance(color) * DENOSIE_COMPRESS;
+    float     lum        = Math::luminance(color);
 
     glm::vec3 colorAccum;
     glm::vec3 momentAccum;
@@ -360,7 +388,7 @@ __global__ void filterVariance(float *varianceOut,
                 continue;
             }
             int   idxQ   = qx + qy * width;
-            float weight = Gaussian3x3[i + 1] * Gaussian3x3[j + 1];
+            float weight = Gaussian3x3[i + 1][j + 1];
             sum += varianceIn[idxQ] * weight;
             weightSum += weight;
         }
@@ -372,15 +400,15 @@ void GBuffer::create(int width, int height) {
     this->height  = height;
     int numPixels = width * height;
     albedo        = cudaMalloc<glm::vec3>(numPixels);
-#if FLOAT_MOTION_BUFFER
-    motion = cudaMalloc<glm::vec3>(numPixels);
-#else
-    motion = cudaMalloc<int>(numPixels);
-#endif
+
     for (int i = 0; i < 2; i++) {
-        normal[i] = cudaMalloc<glm::vec3>(numPixels);
+        normal[i] = cudaMalloc<NormT>(numPixels);
         primId[i] = cudaMalloc<int>(numPixels);
-        depth[i]  = cudaMalloc<float>(numPixels);
+#if DENOISER_ENCODE_POSITION
+        depth[i] = cudaMalloc<float>(numPixels);
+#else
+        position[i] = cudaMalloc<glm::vec3>(numPixels);
+#endif
     }
 }
 
@@ -390,7 +418,11 @@ void GBuffer::destroy() {
     for (int i = 0; i < 2; i++) {
         cudaSafeFree(normal[i]);
         cudaSafeFree(primId[i]);
+#if DENOISER_ENCODE_POSITION
         cudaSafeFree(depth[i]);
+#else
+        cudaSafeFree(position[i]);
+#endif
     }
 }
 

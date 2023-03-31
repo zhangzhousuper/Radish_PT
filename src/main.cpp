@@ -1,4 +1,5 @@
 #include "main.h"
+#include "GLFW/glfw3.h"
 #include "preview.h"
 #include <cstring>
 
@@ -114,7 +115,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-void saveImage() {
+void saveImage(bool jpg) {
     cudaMemcpyDevToHost(scene->state.image.data(), devImage,
                         width * height * sizeof(glm::vec3));
 
@@ -147,11 +148,22 @@ void saveImage() {
     filename = ss.str();
 
     // CHECKITOUT
-    img.savePNG(filename);
+    if (jpg) {
+        img.saveJPG(filename);
+    } else {
+        img.savePNG(filename);
+    }
     // img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
 void runCuda() {
+    glm::vec3 camOrigPos = scene->camera.position;
+
+    if (Settings::animateCamera) {
+        float t                = glfwGetTime() * Settings::animateSpeed;
+        scene->camera.position = camOrigPos + glm::vec3(glm::cos(t), 0.f, glm::sin(t)) * Settings::animateRadius;
+    }
+
     if (State::camChanged) {
         iteration = 0;
         scene->camera.update();
@@ -163,6 +175,8 @@ void runCuda() {
     pathTrace(DirectIllum, IndirectIllum, iteration);
 
     if (Settings::denoiser == Denoiser::None) {
+        cudaMemcpyDevToDev(tmpDirect, DirectIllum, width * height * sizeof(glm::vec3));
+        cudaMemcpyDevToDev(tmpIndirect, IndirectIllum, width * height * sizeof(glm::vec3));
     } else if (Settings::denoiser == Denoiser::Gaussian) {
     } else if (Settings::denoiser == Denoiser::EAWavelet) {
         EAWFilter.filter(tmpDirect, DirectIllum, gBuffer, scene->camera);
@@ -174,6 +188,12 @@ void runCuda() {
     if (Settings::modulate) {
         modulateAlbedo(tmpDirect, gBuffer);
         modulateAlbedo(tmpIndirect, gBuffer);
+
+        if (Settings::ImagePreviewOpt == 4) {
+            modulateAlbedo(DirectIllum, gBuffer);
+        } else if (Settings::ImagePreviewOpt == 5) {
+            modulateAlbedo(IndirectIllum, gBuffer);
+        }
         // modulateAlbedo(devTemp, gBuffer);
     }
     addImage(devTemp, tmpDirect, tmpIndirect, width, height);
@@ -182,7 +202,11 @@ void runCuda() {
     cudaGLMapBufferObject((void **) &devPBO, pbo);
 
     if (Settings::ImagePreviewOpt == 2) {
+#if DENOISER_ENCODE_POSITION
         copyImageToPBO(devPBO, gBuffer.getDepth(), width, height);
+#else
+        copyImageToPBO(devPBO, gBuffer.getPos(), width, height, Settings::toneMapping);
+#endif
     } else if (Settings::ImagePreviewOpt == 3) {
         copyImageToPBO(devPBO, gBuffer.motion, width, height);
     } else if (Settings::ImagePreviewOpt == 11) {
@@ -194,9 +218,11 @@ void runCuda() {
         case 0:
             devImage = gBuffer.albedo;
             break;
+#if !DENOISER_ENCODE_NORMAL
         case 1:
             devImage = gBuffer.getNormal();
             break;
+#endif
         case 4:
             devImage = DirectIllum;
             break;
@@ -230,6 +256,7 @@ void runCuda() {
     cudaGLUnmapBufferObject(pbo);
     iteration++;
     gBuffer.update(scene->camera);
+    scene->camera.position = camOrigPos;
 }
 
 void keyCallback(GLFWwindow *window, int key, int scancode, int action,
@@ -239,12 +266,14 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action,
     if (action == GLFW_PRESS) {
         switch (key) {
         case GLFW_KEY_ESCAPE:
-            saveImage();
+            saveImage(false);
             glfwSetWindowShouldClose(window, GL_TRUE);
             break;
         case GLFW_KEY_S:
-            saveImage();
+            saveImage(false);
             break;
+        case GLFW_KEY_J:
+            saveImage(true);
         case GLFW_KEY_T:
             Settings::toneMapping = (Settings::toneMapping + 1) % 3;
             break;

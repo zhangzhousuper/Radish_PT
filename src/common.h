@@ -10,11 +10,13 @@
 
 #define DENOISER_SPLIT_DIRECT_INDIRECT true
 #define DENOISER_DEMODULATE true
+#define DENOISER_ENCODE_NORMAL true
+#define DENOISER_ENCODE_POSITION true
 
 #define DEMODULATE_EPS 1e-3f
 
-#define DENOISE_COMPRESS 1.f
-
+#define DENOISE_CLAMP 128.f
+#define DENOISE_COMPRESS 16.f
 #define DENOISE_LIGHT_ID -2
 
 struct ToneMapping {
@@ -45,6 +47,10 @@ struct Settings {
     static int  ImagePreviewOpt;
     static int  denoiser;
     static bool modulate;
+
+    static bool  animateCamera;
+    static float animateRadius;
+    static float animateSpeed;
 };
 
 struct State {

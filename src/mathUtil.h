@@ -38,7 +38,28 @@ bool between(const T &x, const T &min, const T &max) {
     return x >= min && x <= max;
 }
 
-__host__ __device__ inline bool hasNanOrInf(glm::vec3 v) {
+__host__ __device__ inline glm::vec2 encodeNormalHemiOct32(glm::vec3 n) {
+    glm::vec2 p = glm::vec2(n) / (glm::abs(n.x) + glm::abs(n.y) + n.z);
+    return glm::vec2(p.x + p.y, p.x - p.y);
+}
+
+__host__ __device__ inline glm::vec3 decodeNormalHemiOct32(glm::vec2 n) {
+    glm::vec2 temp = glm::vec2(n.x + n.y, n.x - n.y) * 0.5f;
+    glm::vec3 v(temp, 1.f - glm::abs(temp.x) - glm::abs(temp.y));
+    return glm::normalize(v);
+}
+
+__host__ __device__ inline glm::vec3 HDRToLDR(glm::vec3 c) {
+    return c / (c + 1.f) * 1.f;
+}
+
+__host__ __device__ inline glm::vec3 LDRToHDR(glm::vec3 c) {
+    return c /= 1.f;
+    return c / (1.f - c + 1e-4f);
+}
+
+__host__ __device__ inline bool
+    hasNanOrInf(glm::vec3 v) {
     return isnan(v.x) || isnan(v.y) || isnan(v.z) || isinf(v.x) || isinf(v.y) || isinf(v.z);
 }
 
