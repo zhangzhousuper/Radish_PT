@@ -20,6 +20,12 @@ struct Ray {
 
 struct Camera {
     __device__ glm::vec2 getRasterUV(glm::vec3 pos) {
+        /*glm::vec4 projected = viewProjection * glm::vec4(pos, 1.f);
+         projected /= projected.w;
+         projected = -projected;
+         projected = projected * .5f + .5f;
+         return glm::vec2(projected.x, projected.y);*/
+
         glm::vec3 dir = glm::normalize(pos - position);
         float     d   = 1.f / glm::dot(dir, view);
 
@@ -35,8 +41,9 @@ struct Camera {
 
     __device__ glm::ivec2 getRasterCoord(glm::vec3 pos) {
         glm::vec2 ndc = getRasterUV(pos);
-        int       ix  = (resolution.x - FLT_MIN) * ndc.x;
-        int       iy  = (resolution.y - FLT_MIN) * ndc.y;
+        int       ix  = glm::clamp(int((resolution.x - 1) * ndc.x + .5f), 0,
+                                   resolution.x - 1);
+        int       iy  = glm::clamp(int((resolution.y - 1) * ndc.y + .5f), 0, resolution.y - 1);
         return {ix, iy};
     }
 
@@ -95,6 +102,8 @@ struct Camera {
         right          = glm::normalize(glm::cross(view, glm::vec3(0, 1, 0)));
         up             = glm::normalize(glm::cross(right, view));
         rotationMatInv = glm::inverse(glm::mat3(right, up, view));
+
+        viewProjection = projMatrix() * viewMatrix();
     }
 
     glm::mat4 viewMatrix() {
@@ -103,7 +112,7 @@ struct Camera {
 
     glm::mat4 projMatrix() {
         float aspect = static_cast<float>(resolution.x) / resolution.y;
-        return glm::perspective(fov.y * 2.f, aspect, .01f, 1000.f);
+        return glm::perspective(glm::radians(fov.y * 2.f), aspect, .01f, 1000.f);
     }
 
     glm::ivec2 resolution;
@@ -115,6 +124,7 @@ struct Camera {
     glm::vec2  fov;
     glm::vec2  pixelLength;
     glm::mat3  rotationMatInv;
+    glm::mat4  viewProjection;
     float      lensRadius;
     float      focalDist;
     float      tanFovY;

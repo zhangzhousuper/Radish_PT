@@ -35,7 +35,10 @@ glm::vec3 *DirectIllum   = nullptr;
 glm::vec3 *IndirectIllum = nullptr;
 GBuffer    gBuffer;
 
-glm::vec3 *devImage = nullptr;
+glm::vec3 *devTemp     = nullptr;
+glm::vec3 *tmpDirect   = nullptr;
+glm::vec3 *tmpIndirect = nullptr;
+glm::vec3 *devImage    = nullptr;
 
 LeveledEAWFilter     EAWFilter;
 SpatioTemporalFilter directFilter;
@@ -45,12 +48,20 @@ void initImageBuffer() {
     DirectIllum   = cudaMalloc<glm::vec3>(width * height);
     IndirectIllum = cudaMalloc<glm::vec3>(width * height);
     gBuffer.create(width, height);
+    devTemp = cudaMalloc<glm::vec3>(width * height);
+
+    tmpDirect   = cudaMalloc<glm::vec3>(width * height);
+    tmpIndirect = cudaMalloc<glm::vec3>(width * height);
 }
 
 void freeImageBuffer() {
     cudaFree(DirectIllum);
     cudaFree(IndirectIllum);
     gBuffer.destroy();
+
+    cudaSafeFree(devTemp);
+    cudaSafeFree(tmpDirect);
+    cudaSafeFree(tmpIndirect);
 }
 
 //-------------------------------
@@ -97,7 +108,6 @@ int main(int argc, char **argv) {
     Resource::clear();
     freeImageBuffer();
     pathTraceFree();
-    EAWFilter.destroy();
     directFilter.destroy();
     indirectFilter.destroy();
 
@@ -115,7 +125,7 @@ void saveImage() {
     for (int x = 0; x < width; x++) {
         for (int y = 0; y < height; y++) {
             int       index = x + (y * width);
-            glm::vec3 color = renderState->image[index] / samples;
+            glm::vec3 color = renderState->image[index];
             switch (Settings::toneMapping) {
             case ToneMapping::Filmic:
                 color = Math::filmic(color);
@@ -142,7 +152,6 @@ void saveImage() {
 }
 
 void runCuda() {
-    State::camChanged = true;
     if (State::camChanged) {
         iteration = 0;
         scene->camera.update();
@@ -150,25 +159,36 @@ void runCuda() {
         State::camChanged = false;
     }
     gBuffer.render(scene->devScene, scene->camera);
+
+    pathTrace(DirectIllum, IndirectIllum, iteration);
+
+    if (Settings::denoiser == Denoiser::None) {
+    } else if (Settings::denoiser == Denoiser::Gaussian) {
+    } else if (Settings::denoiser == Denoiser::EAWavelet) {
+        EAWFilter.filter(tmpDirect, DirectIllum, gBuffer, scene->camera);
+        EAWFilter.filter(tmpIndirect, IndirectIllum, gBuffer, scene->camera);
+    } else {
+        directFilter.filter(tmpDirect, DirectIllum, gBuffer, scene->camera);
+        indirectFilter.filter(tmpIndirect, IndirectIllum, gBuffer, scene->camera);
+    }
+    if (Settings::modulate) {
+        modulateAlbedo(tmpDirect, gBuffer);
+        modulateAlbedo(tmpIndirect, gBuffer);
+        // modulateAlbedo(devTemp, gBuffer);
+    }
+    addImage(devTemp, tmpDirect, tmpIndirect, width, height);
+
     uchar4 *devPBO = nullptr;
     cudaGLMapBufferObject((void **) &devPBO, pbo);
-
-    pathTrace(DirectIllum, IndirectIllum);
-    directFilter.temporalAccumulate(DirectIllum, gBuffer);
-    indirectFilter.temporalAccumulate(IndirectIllum, gBuffer);
-
-    // EAWFilter.filter(DirectIllum, gBuffer, scene->camera);
-    // EAWFilter.filter(IndirectIllum, gBuffer, scene->camera);
-
-    addImage(DirectIllum, IndirectIllum, width, height);
-    modulateAlbedo(DirectIllum, gBuffer);
 
     if (Settings::ImagePreviewOpt == 2) {
         copyImageToPBO(devPBO, gBuffer.getDepth(), width, height);
     } else if (Settings::ImagePreviewOpt == 3) {
         copyImageToPBO(devPBO, gBuffer.motion, width, height);
-    } else if (Settings::ImagePreviewOpt == 6) {
-        copyImageToPBO(devPBO, directFilter.accumMoment, width, height);
+    } else if (Settings::ImagePreviewOpt == 11) {
+        copyImageToPBO(devPBO, directFilter.variance, width, height);
+    } else if (Settings::ImagePreviewOpt == 12) {
+        copyImageToPBO(devPBO, indirectFilter.variance, width, height);
     } else {
         switch (Settings::ImagePreviewOpt) {
         case 0:
@@ -183,13 +203,29 @@ void runCuda() {
         case 5:
             devImage = IndirectIllum;
             break;
+        case 6:
+            devImage = tmpDirect;
+            break;
         case 7:
-            devImage = directFilter.accumColor;
+            devImage = tmpIndirect;
+            break;
+        case 8:
+            devImage = devTemp;
+            break;
+        case 9:
+            devImage = directFilter.accumMoment[directFilter.frameIdx];
+            break;
+        case 10:
+            devImage = indirectFilter.accumMoment[directFilter.frameIdx];
             break;
         }
 
         copyImageToPBO(devPBO, devImage, width, height, Settings::toneMapping);
     }
+
+    directFilter.nextFrame();
+    indirectFilter.nextFrame();
+
     // unmap buffer object
     cudaGLUnmapBufferObject(pbo);
     iteration++;

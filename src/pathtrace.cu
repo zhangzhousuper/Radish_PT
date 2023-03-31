@@ -72,7 +72,7 @@ void pathTraceFree() {
 }
 
 __global__ void sendImageToPBO(uchar4 *pbo, glm::vec3 *image, int width,
-                               int height, int toneMapping) {
+                               int height, int toneMapping, float scale) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
@@ -81,7 +81,7 @@ __global__ void sendImageToPBO(uchar4 *pbo, glm::vec3 *image, int width,
     }
     int idx = x + (y * width);
 
-    glm::vec3 color = image[idx];
+    glm::vec3 color = image[idx] * scale;
 
     switch (toneMapping) {
     case ToneMapping::Filmic:
@@ -159,12 +159,12 @@ __global__ void sendImageToPBO(uchar4 *pbo, int *image, int width, int height) {
 }
 
 void copyImageToPBO(uchar4 *devPBO, glm::vec3 *devImage, int width, int height,
-                    int toneMapping) {
+                    int toneMapping, float scale) {
     const int BlockSize = 32;
     dim3      blockSize(BlockSize, BlockSize);
     dim3      blockNum(ceilDiv(width, BlockSize), ceilDiv(height, BlockSize));
     sendImageToPBO<<<blockNum, blockSize>>>(devPBO, devImage, width, height,
-                                            toneMapping);
+                                            toneMapping, scale);
 }
 
 void copyImageToPBO(uchar4 *devPBO, float *devImage, int width, int height) {
@@ -275,7 +275,7 @@ __global__ void computeIntersections(int depth, int numPaths,
     intersections[pathIdx] = intersec;
 }
 
-__global__ void pathIntegSampleSurface(int iter, int depth,
+__global__ void pathIntegSampleSurface(int looper, int iter, int depth,
                                        PathSegment  *segments,
                                        Intersection *intersections,
                                        DevScene *scene, int numPaths) {
@@ -314,8 +314,7 @@ __global__ void pathIntegSampleSurface(int iter, int depth,
         return;
     }
 
-    Sampler rng = makeSeededRandomEngine(
-        iter, idx, 4 + depth * SamplesConsumedOneIter, scene->sampleSequence);
+    Sampler rng = makeSeededRandomEngine(looper, idx, 4 + depth * SamplesConsumedOneIter, scene->sampleSequence);
 
     Material material = scene->getTexturedMaterialAndSurface(intersec);
 
@@ -397,7 +396,7 @@ __global__ void finalGather(int nPaths, glm::vec3 *image,
     }
 }
 
-__global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
+__global__ void singleKernelPT(int looper, int iter, int maxDepth, DevScene *scene,
                                Camera cam, glm::vec3 *directIllum,
                                glm::vec3 *indirectIllum) {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
@@ -409,7 +408,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
     glm::vec3 indirect(0.f);
 
     int     index = y * cam.resolution.x + x;
-    Sampler rng   = makeSeededRandomEngine(iter, index, 0, scene->sampleSequence);
+    Sampler rng   = makeSeededRandomEngine(looper, index, 0, scene->sampleSequence);
 
     Ray ray = cam.sample(x, y, sample4D(rng));
 
@@ -417,10 +416,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
     scene->intersect(ray, intersec);
 
     if (intersec.primId == NullPrimitive) {
-        if (scene->envMap != nullptr) {
-            glm::vec2 uv = Math::toPlane(ray.direction);
-            direct += scene->envMap->linearSample(uv);
-        }
+        direct = glm::vec3(1.f);
         goto WriteRadiance;
     }
 
@@ -430,9 +426,7 @@ __global__ void singleKernelPT(int iter, int maxDepth, DevScene *scene,
     material.baseColor = glm::vec3(1.f);
 #endif
     if (material.type == Material::Type::Light) {
-        if (glm::dot(intersec.norm, ray.direction) > 0.f) {
-            direct = material.baseColor;
-        }
+        direct = glm::vec3(1.f);
         goto WriteRadiance;
     }
 
@@ -521,13 +515,14 @@ WriteRadiance:
     // indirect /= albedo + DEMODULATE_EPS;
 #endif
 
-    if (!isnan(direct.x) && !isnan(direct.y) && !isnan(direct.z) && !isinf(direct.x) && !isinf(direct.y) && !isinf(direct.z)) {
-        directIllum[index] = direct / (direct + 1.f);
+    if (Math::hasNanOrInf(direct)) {
+        direct = glm::vec3(0.f);
     }
-
-    if (!isnan(indirect.x) && !isnan(indirect.y) && !isnan(indirect.z) && !isinf(indirect.x) && !isinf(indirect.y) && !isinf(indirect.z)) {
-        indirectIllum[index] = indirect / (indirect + 1.f);
+    if (Math::hasNanOrInf(indirect)) {
+        indirect = glm::vec3(0.f);
     }
+    directIllum[index]   = (directIllum[index] * float(iter) + direct / DENOISE_COMPRESS) / float(iter + 1);
+    indirectIllum[index] = (indirectIllum[index] * float(iter) + indirect / DENOISE_COMPRESS) / float(iter + 1);
 }
 
 __global__ void BVHVisualize(int iter, DevScene *scene, Camera cam,
@@ -571,7 +566,7 @@ struct RemoveInvalidPaths {
  * Wrapper for the __global__ call that sets up the kernel calls and does a
  * ton of memory management
  */
-void pathTrace(glm::vec3 *DirectIllum, glm::vec3 *IndirectIllum) {
+void pathTrace(glm::vec3 *DirectIllum, glm::vec3 *IndirectIllum, int iter) {
     const Camera &cam = hstScene->camera;
 
     const int BlockSizeSinglePTX = 8;
@@ -584,7 +579,7 @@ void pathTrace(glm::vec3 *DirectIllum, glm::vec3 *IndirectIllum) {
     dim3 singlePTBlockSize(BlockSizeSinglePTX, BlockSizeSinglePTY);
 
     singleKernelPT<<<singlePTBlockNum, singlePTBlockSize>>>(
-        looper, Settings::traceDepth, hstScene->devScene, cam, DirectIllum,
+        looper, iter, Settings::traceDepth, hstScene->devScene, cam, DirectIllum,
         IndirectIllum);
 
     checkCUDAError("pathTrace");

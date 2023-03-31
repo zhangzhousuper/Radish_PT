@@ -28,7 +28,9 @@ extern int    iteration;
 extern int width;
 extern int height;
 
-extern LeveledEAWFilter EAWFilter;
+extern LeveledEAWFilter     EAWFilter;
+extern SpatioTemporalFilter directFilter;
+extern SpatioTemporalFilter indirectFilter;
 
 void runCuda();
 void keyCallback(GLFWwindow *window, int key, int scancode, int action,

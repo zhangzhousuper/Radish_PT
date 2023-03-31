@@ -20,23 +20,38 @@ struct GBuffer {
     void render(DevScene *scene, const Camera &cam);
     void update(const Camera &cam);
 
-    __host__ __device__ glm::vec3 *getNormal() {
-        return normal[frame];
+    __device__ glm::vec3 *getNormal() {
+        return normal[frameIdx];
     }
-    __host__ __device__ int *getPrimId() {
-        return primId[frame];
+    __device__ int *getPrimId() {
+        return primId[frameIdx];
     }
-    __host__ __device__ float *getDepth() {
-        return depth[frame];
+    __device__ float *getDepth() {
+        return depth[frameIdx];
+    }
+
+    __device__ glm::vec3 *lastNormal() {
+        return normal[frameIdx ^ 1];
+    }
+
+    __device__ int *lastPrimId() {
+        return primId[frameIdx ^ 1];
+    }
+
+    __device__ float *lastDepth() {
+        return depth[frameIdx ^ 1];
     }
 
     glm::vec3 *albedo    = nullptr;
     glm::vec3 *normal[2] = {nullptr};
-    int       *motion    = nullptr;
-    float     *depth[2]  = {nullptr};
-    int       *primId[2] = {nullptr};
-    int        frame     = 0;
-
+#if FLOAT_MOTION_BUFFER
+    glm::vec2 *motion = nullptr;
+#else
+    int *motion = nullptr;
+#endif
+    float *depth[2]  = {nullptr};
+    int   *primId[2] = {nullptr};
+    int    frameIdx  = 0;
     Camera lastCam;
     int    width;
     int    height;
@@ -45,18 +60,18 @@ struct GBuffer {
 struct EAWaveletFilter {
     EAWaveletFilter() = default;
 
-    EAWaveletFilter(int width, int height) :
-        width(width), height(height) {
+    EAWaveletFilter(int width, int height, float sigLumin, float sigNormal, float sigDepth) :
+        width(width), height(height), sigLumin(sigLumin), sigNormal(sigNormal), sigDepth(sigDepth) {
     }
 
     void filter(glm::vec3 *colorOut, glm::vec3 *colorIn, const GBuffer &gBuffer,
                 const Camera &cam, int level);
     void filter(glm::vec3 *colorOut, glm::vec3 *colorIn, float *varianceOut, float *varianceIn,
-                const GBuffer &gBuffer, const Camera &cam, int level);
+                float *filteredVar, const GBuffer &gBuffer, const Camera &cam, int level);
 
-    float sigLumin  = 64.f;
-    float sigNormal = .2f;
-    float sigDepth  = 1.f;
+    float sigLumin;
+    float sigNormal;
+    float sigDepth;
 
     int width  = 0;
     int height = 0;
@@ -67,7 +82,7 @@ struct LeveledEAWFilter {
     void create(int width, int height, int level);
     void destroy();
 
-    void LeveledEAWFilter::filter(glm::vec3 *&colorIn, const GBuffer &gBuffer, const Camera &cam);
+    void filter(glm::vec3 *&colorOut, glm::vec3 *colorIn, const GBuffer &gBuffer, const Camera &cam);
 
     EAWaveletFilter waveletFilter;
     int             level  = 0;
@@ -80,17 +95,26 @@ struct SpatioTemporalFilter {
     void destroy();
 
     void temporalAccumulate(glm::vec3 *colorIn, const GBuffer &gBuffer);
+    void estimateVariance();
+    void filterVariance();
+
+    void filter(glm::vec3 *&colorOut, glm::vec3 *colorIn, const GBuffer &gBuffer, const Camera &cam);
+
+    void nextFrame();
 
     EAWaveletFilter waveletFilter;
     int             level = 0;
 
-    glm::vec3 *accumColor  = nullptr;
-    glm::vec2 *accumMoment = nullptr;
-    bool       firstTime   = true;
-};
+    glm::vec3 *accumColor[2]  = {nullptr};
+    glm::vec3 *accumMoment[2] = {nullptr};
+    float     *variance       = nullptr;
+    bool       firstTime      = true;
 
-void denoiserInit(int width, int height);
-void denoiserFree();
+    glm::vec3 *tmpColor    = nullptr;
+    float     *tmpVar      = nullptr;
+    float     *filteredVar = nullptr;
+    int        frameIdx    = 0;
+};
 
 void modulateAlbedo(glm::vec3 *devImage, const GBuffer &gBuffer);
 void addImage(glm::vec3 *devImage, glm::vec3 *in, int width, int height);
