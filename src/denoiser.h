@@ -8,7 +8,6 @@
 #include <glm/gtx/intersect.hpp>
 
 #include "common.h"
-#include "glm/fwd.hpp"
 #include "pathtrace.h"
 #include "scene.h"
 

@@ -440,8 +440,7 @@ void GBuffer::render(DevScene *scene, const Camera &cam) {
     checkCUDAError("renderGBuffer");
 }
 
-void modulateAlbedo(glm::vec3 *devImage, GBuffer gBuffer, int width,
-                    int height) {
+void modulateAlbedo(glm::vec3 *devImage, const GBuffer &gBuffer) {
     constexpr int BlockSize = 32;
     dim3          blockSize(BlockSize, BlockSize);
     dim3          blockNum(ceilDiv(gBuffer.width, BlockSize), ceilDiv(gBuffer.height, BlockSize));

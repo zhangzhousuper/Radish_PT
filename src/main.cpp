@@ -3,7 +3,7 @@
 #include "preview.h"
 #include <cstring>
 
-#include "denoiser.h"
+
 #include "image.h"
 #include "pathtrace.h"
 #include "utilities.h"
