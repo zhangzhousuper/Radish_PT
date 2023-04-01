@@ -255,8 +255,7 @@ __global__ void modulate(glm::vec3 *devImage, GBuffer gBuffer, int width,
         int       idx   = x + y * width;
         glm::vec3 color = devImage[idx];
         color           = Math::LDRToHDR(color);
-        devImage[idx] *=
-            glm::max(gBuffer.albedo[idx] - DEMODULATE_EPS, glm::vec3(0.f));
+        devImage[idx]   = color * glm::max(gBuffer.albedo[idx], glm::vec3(0.f));
     }
 }
 
@@ -280,7 +279,7 @@ __global__ void add(glm::vec3 *out, glm::vec3 *in1, glm::vec3 *in2, int width, i
     }
 }
 
-__global__ void temporalAccumulate(glm::vec3 *colorAccumOut, glm::vec3 *colorAccumIn, glm::vec3 *momentAccumIn, glm::vec3 *momentAccumOut, glm::vec3 *colorIn, GBuffer gBuffer, bool first) {
+__global__ void temporalAccumulate(glm::vec3 *colorAccumOut, glm::vec3 *colorAccumIn, glm::vec3 *momentAccumOut, glm::vec3 *momentAccumIn, glm::vec3 *colorIn, GBuffer gBuffer, bool first) {
     const float alpha = 0.2f;
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -320,7 +319,7 @@ __global__ void temporalAccumulate(glm::vec3 *colorAccumOut, glm::vec3 *colorAcc
 
     if (diff) {
         colorAccum  = color;
-        momentAccum = glm::vec3(glm::mix(glm::vec2(lastMoment), glm::vec2(lum, lum * lum), alpha), lastMoment.b + 1.f);
+        momentAccum = glm::vec3(lum, lum * lum, 0.f);
     } else {
         colorAccum  = glm::mix(lastColor, color, alpha);
         momentAccum = glm::vec3(glm::mix(glm::vec2(lastMoment), glm::vec2(lum, lum * lum), alpha), lastMoment.b + 1.f);
@@ -400,6 +399,7 @@ void GBuffer::create(int width, int height) {
     this->height  = height;
     int numPixels = width * height;
     albedo        = cudaMalloc<glm::vec3>(numPixels);
+    motion        = cudaMalloc<int>(numPixels);
 
     for (int i = 0; i < 2; i++) {
         normal[i] = cudaMalloc<NormT>(numPixels);

@@ -56,19 +56,17 @@ struct GBuffer {
 
     glm::vec3 *albedo    = nullptr;
     NormT     *normal[2] = {nullptr};
-#if FLOAT_MOTION_BUFFER
-    glm::vec2 *motion = nullptr;
-#else
-    int       *motion      = nullptr;
-#endif
+
+    int *motion = nullptr;
 
 #if DENOISER_ENCODE_POSITION
     float *depth[2] = {nullptr};
 #else
     glm::vec3 *position[2] = {nullptr};
 #endif
-    int   *primId[2] = {nullptr};
-    int    frameIdx  = 0;
+    int *primId[2] = {nullptr};
+    int  frameIdx  = 0;
+
     Camera lastCam;
     int    width;
     int    height;
