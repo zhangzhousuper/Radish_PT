@@ -473,7 +473,6 @@ void DevScene::create(const Scene &scene) {
   for (auto texture : scene.textures) {
     cudaMemcpyHostToDev(textureData + textureOffset, texture->data(),
                         texture->byteSize());
-    std::cout << texture->byteSize() << "\n";
     checkCUDAError("DevScene::texture::copy");
     textureObjs.push_back({texture, textureData + textureOffset});
     textureOffset += texture->byteSize() / sizeof(glm::vec3);
