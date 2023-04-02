@@ -83,7 +83,7 @@ template <typename T> struct DiscreteSampler1D {
     for (const auto &val : values) {
       sum += val;
     }
-    T sumInv = static_cast<float>(values.size()) / sum;
+    T sumInv = static_cast<T>(values.size()) / sum;
 
     for (auto &val : values) {
       val *= sumInv;
