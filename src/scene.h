@@ -157,7 +157,8 @@ struct DevScene {
     glm::vec2 tc = texcoords[primId * 3 + 2];
 
     intersec.pos = vb * bary.x + vc * bary.y + va * (1.f - bary.x - bary.y);
-    intersec.norm = nb * bary.x + nc * bary.y + na * (1.f - bary.x - bary.y);
+    intersec.norm = glm::normalize(nb * bary.x + nc * bary.y +
+                                   na * (1.f - bary.x - bary.y));
     intersec.uv = tb * bary.x + tc * bary.y + ta * (1.f - bary.x - bary.y);
   }
 
@@ -434,12 +435,10 @@ struct DevScene {
       return INVALID_PDF;
     }
 #endif
-    float area = Math::triangleArea(v0, v1, v2);
     radiance = lightUnitRadiance[lightId];
     wi = glm::normalize(posToSampled);
-    float power = Math::luminance(radiance) * (area * 2.f * PI);
-    return Math::pdfAreaToSolidAngle(power * sumLightPowerInv, pos, sampled,
-                                     normal);
+    return Math::pdfAreaToSolidAngle(
+        Math::luminance(radiance) * sumLightPowerInv, pos, sampled, normal);
   }
 
   glm::vec3 *vertices = nullptr;

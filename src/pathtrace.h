@@ -3,6 +3,7 @@
 #include <device_launch_parameters.h>
 
 #include "scene.h"
+#include "common.h"
 #include <vector>
 
 void InitDataContainer(GuiDataContainer *guiData);

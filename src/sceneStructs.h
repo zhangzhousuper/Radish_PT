@@ -106,11 +106,11 @@ struct Camera {
         viewProjection = projMatrix() * viewMatrix();
     }
 
-    glm::mat4 viewMatrix() {
+    glm::mat4 viewMatrix() const {
         return glm::lookAt(position, position + view, up);
     }
 
-    glm::mat4 projMatrix() {
+    glm::mat4 projMatrix() const {
         float aspect = static_cast<float>(resolution.x) / resolution.y;
         return glm::perspective(glm::radians(fov.y * 2.f), aspect, .01f, 1000.f);
     }

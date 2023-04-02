@@ -149,7 +149,7 @@ void Scene::createLightSampler() {
         for (int i = 0; i < envMap->height(); i++) {
             for (int j = 0; j < envMap->width(); j++) {
                 int idx  = i * envMap->width() + j;
-                pdf[idx] = Math::luminance(envMap->data()[idx]);
+                pdf[idx] = Math::luminance(envMap->data()[idx]) * glm::sin((.5f + i) / envMap->height() * PI);
             }
         }
         envMapSampler = DiscreteSampler1D<float>(pdf);
@@ -191,7 +191,7 @@ void Scene::buildDevData() {
         const auto &material         = materials[inst.materialId];
         glm::vec3   radianceUnitArea = material.baseColor;
         float       powerUnitArea =
-            Math::luminance(radianceUnitArea) * 2.f * glm::pi<float>();
+            Math::luminance(radianceUnitArea);
 
         for (size_t i = 0; i < inst.meshData->vertices.size(); i++) {
             meshData.vertices.push_back(glm::vec3(

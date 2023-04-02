@@ -243,8 +243,8 @@ __global__ void waveletFilter(glm::vec3 *colorOut,
             weight2Sum += weight2;
         }
     }
-    colorOut[idxP]    = (weightSum <= FLT_EPSILON) ? colorIn[idxP] : colorSum / weightSum;
-    varianceOut[idxP] = (weight2Sum <= FLT_EPSILON) ? varianceIn[idxP] : varianceSum / weight2Sum;
+    colorOut[idxP]    = (weightSum < FLT_EPSILON) ? colorIn[idxP] : colorSum / weightSum;
+    varianceOut[idxP] = (weight2Sum < FLT_EPSILON) ? varianceIn[idxP] : varianceSum / weight2Sum;
 }
 
 __global__ void modulate(glm::vec3 *devImage, GBuffer gBuffer, int width,

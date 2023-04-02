@@ -3,7 +3,6 @@
 #include "preview.h"
 #include <cstring>
 
-
 #include "image.h"
 #include "pathtrace.h"
 #include "utilities.h"
@@ -56,8 +55,8 @@ void initImageBuffer() {
 }
 
 void freeImageBuffer() {
-    cudaFree(DirectIllum);
-    cudaFree(IndirectIllum);
+    cudaSafeFree(DirectIllum);
+    cudaSafeFree(IndirectIllum);
     gBuffer.destroy();
 
     cudaSafeFree(devTemp);
@@ -207,7 +206,13 @@ void runCuda() {
 #else
         copyImageToPBO(devPBO, gBuffer.getPos(), width, height, Settings::toneMapping);
 #endif
-    } else if (Settings::ImagePreviewOpt == 3) {
+    }
+#if DENOISER_ENCODE_NORMAL
+    else if (Settings::ImagePreviewOpt == 1) {
+        copyImageToPBO(devPBO, gBuffer.getNormal(), width, height);
+    }
+#endif
+    else if (Settings::ImagePreviewOpt == 3) {
         copyImageToPBO(devPBO, gBuffer.motion, width, height);
     } else if (Settings::ImagePreviewOpt == 11) {
         copyImageToPBO(devPBO, directFilter.variance, width, height);
@@ -274,6 +279,7 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action,
             break;
         case GLFW_KEY_J:
             saveImage(true);
+            break;
         case GLFW_KEY_T:
             Settings::toneMapping = (Settings::toneMapping + 1) % 3;
             break;
