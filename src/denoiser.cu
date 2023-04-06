@@ -225,7 +225,7 @@ __global__ void waveletFilter(glm::vec3 *colorOut, glm::vec3 *colorIn,
       glm::vec3 colorQ = colorIn[idxQ];
 
       float distPos2 = glm::dot(posP - posQ, posP - posQ);
-      float wPos = glm::exp(-distPos2 / sigDepth) + 1e-4f;
+      float wPos = glm::exp(-distPos2 / (sigDepth + 1e-4f));
 
       float wNormal =
           glm::pow(Math::satDot(normalP, normalQ), sigNormal) + 1e-4f;
