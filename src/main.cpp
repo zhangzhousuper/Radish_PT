@@ -180,7 +180,6 @@ void runCuda() {
                        width * height * sizeof(glm::vec3));
     cudaMemcpyDevToDev(tmpIndirect, IndirectIllum,
                        width * height * sizeof(glm::vec3));
-  } else if (Settings::denoiser == Denoiser::Gaussian) {
   } else if (Settings::denoiser == Denoiser::EAWavelet) {
     EAWFilter.filter(tmpDirect, DirectIllum, gBuffer, scene->camera);
     EAWFilter.filter(tmpIndirect, IndirectIllum, gBuffer, scene->camera);

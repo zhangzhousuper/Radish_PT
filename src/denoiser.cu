@@ -223,7 +223,7 @@ __global__ void waveletFilter(glm::vec3 *colorOut, glm::vec3 *colorIn,
 #endif
       float varQ = varianceIn[idxQ];
       glm::vec3 colorQ = colorIn[idxQ];
-
+      // falcor svgf pass
       float distPos2 = glm::dot(posP - posQ, posP - posQ);
       float wPos = glm::exp(-distPos2 / (sigDepth + 1e-4f));
 
@@ -536,6 +536,7 @@ void LeveledEAWFilter::filter(glm::vec3 *&colorOut, glm::vec3 *colorIn,
   waveletFilter.filter(tmpImg, colorOut, gBuffer, cam, 4);
   std::swap(colorOut, tmpImg);
 }
+
 void SpatioTemporalFilter::create(int width, int height, int level) {
   this->level = level;
   for (int i = 0; i < 2; i++) {
