@@ -25,14 +25,14 @@ __device__ T findTemporalNeighbor(T *reservoir, int idx,
 
   if (lastIdx < 0) {
     diff = true;
-  } else if (primId != NullPrimitive) {
+  } else if (primId <= NullPrimitive) {
     diff = true;
   } else if (gBuffer.lastPrimId()[lastIdx] != primId) {
     diff = true;
   } else {
     glm::vec3 norm = DECODE_NORM(gBuffer.getNormal()[idx]);
     glm::vec3 lastNorm = DECODE_NORM(gBuffer.lastNormal()[lastIdx]);
-    if (glm::abs(glm::dot(norm, lastNorm)) < .1f) {
+    if (Math::absDot(norm, lastNorm) < .1f) {
       diff = true;
     }
   }
@@ -85,10 +85,10 @@ mergeSpatialNeighborDirect(DirectReservoir *reservoir, int x, int y,
   DirectReservoir resvr;
 #pragma unroll
   for (int i = 0; i < 5; i++) {
-    DirectReservoir spatialResvr =
+    DirectReservoir spatial =
         findSpatialNeighborDisk(reservoir, x, y, gBuffer, sample2D(rng));
-    if (!spatialResvr.invalid()) {
-      resvr.merge(spatialResvr, sample1D(rng));
+    if (!spatial.invalid()) {
+      resvr.merge(spatial, sample1D(rng));
     }
   }
   return resvr;
@@ -178,7 +178,7 @@ ReSTIRDirectKernel(int looper, int iter, DevScene *scene, Camera cam,
     __syncthreads();
 
     DirectReservoir spatial =
-        mergeSpatialNeighborDirect(reservoirIn, x, y, gBuffer, rng);
+        mergeSpatialNeighborDirect(reservoirTemp, x, y, gBuffer, rng);
     if (!spatial.invalid() && !reservoir.invalid()) {
       reservoir.merge(spatial, sample1D(rng));
     }
