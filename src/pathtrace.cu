@@ -27,18 +27,10 @@
 
 static Scene *hstScene = nullptr;
 static GuiDataContainer *guiData = nullptr;
-static PathSegment *devPaths = nullptr;
-static PathSegment *devTerminatedPaths = nullptr;
-static Intersection *devIntersections = nullptr;
-
-// TODO: static variables for device memory, any extra info you need, etc
-// ...
-static thrust::device_ptr<PathSegment> devPathsThr;
-static thrust::device_ptr<PathSegment> devTerminatedPathsThr;
-
-static thrust::device_ptr<Intersection> devIntersectionsThr;
 
 static int looper = 0;
+
+static DirectReservoir *directReservoir = nullptr;
 
 void InitDataContainer(GuiDataContainer *imGuiData) { guiData = imGuiData; }
 
@@ -48,27 +40,13 @@ void pathTraceInit(Scene *scene) {
   const Camera &cam = hstScene->camera;
   const int pixelcount = cam.resolution.x * cam.resolution.y;
 
-  devPaths = cudaMalloc<PathSegment>(pixelcount);
-  cudaMalloc(&devTerminatedPaths, pixelcount * sizeof(PathSegment));
-  devPathsThr = thrust::device_ptr<PathSegment>(devPaths);
-  devTerminatedPathsThr = thrust::device_ptr<PathSegment>(devTerminatedPaths);
-
-  cudaMalloc(&devIntersections, pixelcount * sizeof(Intersection));
-  cudaMemset(devIntersections, 0, pixelcount * sizeof(Intersection));
-  devIntersectionsThr = thrust::device_ptr<Intersection>(devIntersections);
+  directReservoir = cudaMalloc<DirectReservoir>(pixelcount);
+  cudaMemset(directReservoir, 0, sizeof(DirectReservoir) * pixelcount);
 
   checkCUDAError("pathTraceInit");
 }
 
-void pathTraceFree() {
-  cudaSafeFree(devPaths);
-  cudaSafeFree(devTerminatedPaths);
-  cudaSafeFree(devIntersections);
-
-#if ENABLE_GBUFFER
-  cudaSafeFree(devGBuffer);
-#endif
-}
+void pathTraceFree() { cudaSafeFree(directReservoir); }
 
 __global__ void sendImageToPBO(uchar4 *pbo, glm::vec3 *image, int width,
                                int height, int toneMapping, float scale) {
@@ -280,7 +258,7 @@ __global__ void singleKernelPT(int looper, int iter, int maxDepth,
             deltaSample
                 ? 1.f
                 : Math::powerHeuristic(sample.pdf,
-                                       scene->enviromentMapPdf(ray.direction));
+                                       scene->environmentMapPdf(ray.direction));
 
         indirect += radiance * weight;
       }
@@ -331,17 +309,166 @@ WriteRadiance:
       (indirectIllum[index] * float(iter) + indirect) / float(iter + 1);
 }
 
-struct CompactTerminatedPaths {
-  __host__ __device__ bool operator()(const PathSegment &segment) {
-    return !(segment.pixelIndex >= 0 && segment.remainingBounces <= 0);
+__global__ void PTDirectKernel(int looper, int iter, int max_depth,
+                               DevScene *scene, Camera cam,
+                               glm::vec3 *directIllum) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  int y = blockIdx.y * blockDim.y + threadIdx.y;
+  if (x >= cam.resolution.x || y >= cam.resolution.y) {
+    return;
   }
-};
+  glm::vec3 direct(0.f);
 
-struct RemoveInvalidPaths {
-  __host__ __device__ bool operator()(const PathSegment &segment) {
-    return segment.pixelIndex < 0 || segment.remainingBounces <= 0;
+  int idx = x + y * cam.resolution.x;
+  Sampler rng = makeSeededRandomEngine(looper, idx, 0, scene->sampleSequence);
+
+  Ray ray = cam.sample(x, y, sample4D(rng));
+  Intersection intersec;
+  scene->intersect(ray, intersec);
+
+  if (intersec.primId == NullPrimitive) {
+    if (scene->envMap != nullptr) {
+      direct = scene->envMap->linearSample(Math::toPlane(ray.direction));
+    }
+    goto WriteRadiance;
   }
-};
+
+  Material material = scene->getTexturedMaterialAndSurface(intersec);
+
+  if (material.type == Material::Type::Light) {
+    direct = material.baseColor;
+    goto WriteRadiance;
+  }
+
+  intersec.wo = -ray.direction;
+
+  bool deltaBSDF = (material.type == Material::Type::Dielectric);
+  if (!deltaBSDF && glm::dot(intersec.norm, intersec.wo) < 0.f) {
+    intersec.norm = -intersec.norm;
+  }
+
+  if (!deltaBSDF) {
+    glm::vec3 Li;
+    glm::vec3 wi;
+    float lightPdf =
+        scene->sampleDirectLight(intersec.pos, sample4D(rng), Li, wi);
+
+    if (lightPdf > 0.f) {
+      direct = Li * material.BSDF(intersec.norm, intersec.wo, wi) *
+               Math::satDot(intersec.norm, wi) / lightPdf;
+    }
+  }
+
+WriteRadiance:
+  directIllum[idx] =
+      (directIllum[idx] * float(iter) + direct) / float(iter + 1);
+}
+
+__device__ DirectReservoir mergeReservoir(const DirectReservoir &resv1,
+                                          const DirectReservoir &resv2,
+                                          const Intersection &intersec,
+                                          const Material &material,
+                                          glm::vec2 r) {
+  DirectReservoir reservoir{};
+  reservoir.update(resv1.sample,
+                   resv1.directPHat(intersec, material) *
+                       resv1.reservoirWeight *
+                       static_cast<float>(resv1.numSamples),
+                   r.x);
+  reservoir.update(resv2.sample,
+                   resv2.directPHat(intersec, material) *
+                       resv2.reservoirWeight *
+                       static_cast<float>(resv2.numSamples),
+                   r.y);
+  reservoir.numSamples = resv1.numSamples + resv2.numSamples;
+  reservoir.calcReservoirWeight(intersec, material);
+  return reservoir;
+}
+
+__global__ void ReSTIRDirectKernel(int looper, int iter, int max_depth,
+                                   DevScene *scene, Camera cam,
+                                   glm::vec3 *directIllum,
+                                   DirectReservoir *directReservoir) {
+  int x = blockDim.x * blockIdx.x + threadIdx.x;
+  int y = blockDim.y * blockIdx.y + threadIdx.y;
+  if (x >= cam.resolution.x || y >= cam.resolution.y) {
+    return;
+  }
+  glm::vec3 direct(0.f);
+
+  int idx = x + y * cam.resolution.x;
+
+  Sampler rng = makeSeededRandomEngine(looper, idx, 0, scene->sampleSequence);
+
+  Ray ray = cam.sample(x, y, sample4D(rng));
+  Intersection intersec;
+  scene->intersect(ray, intersec);
+
+  if (intersec.primId == NullPrimitive) {
+    if (scene->envMap != nullptr) {
+      direct = scene->envMap->linearSample(Math::toPlane(ray.direction));
+    }
+    goto WriteRadiance;
+  }
+
+  Material material = scene->getTexturedMaterialAndSurface(intersec);
+
+  if (material.type == Material::Type::Light) {
+    direct = material.baseColor;
+    goto WriteRadiance;
+  }
+
+  intersec.wo = -ray.direction;
+
+  bool deltaBSDF = (material.type == Material::Type::Dielectric);
+  if (!deltaBSDF && glm::dot(intersec.norm, intersec.wo) < 0.f) {
+    intersec.norm = -intersec.norm;
+  }
+
+  DirectReservoir reservoir;
+
+  for (int i = 0; i < RESERVOIR_SIZE; ++i) {
+    glm::vec3 Li;
+    glm::vec3 wi;
+    float dist;
+
+    float lightPdf = scene->sampleDirectLightNoVisibility(
+        intersec.pos, sample4D(rng), Li, wi, dist);
+
+    glm::vec3 bsdf = Li * material.BSDF(intersec.norm, intersec.wo, wi) *
+                     Math::satDot(intersec.norm, wi);
+    glm::vec3 weight = (lightPdf > 0.f) ? bsdf / lightPdf : glm::vec3(0.f);
+    reservoir.update({Li, wi, dist}, weight, sample1D(rng));
+  }
+
+  reservoir.calcReservoirWeight(intersec, material);
+
+  DirectReservoir &lastReservoir = directReservoir[idx];
+  glm::vec3 lastReservoirWeight = lastReservoir.reservoirWeight;
+  if (iter == 0) {
+    lastReservoir.clear();
+  }
+
+  LightLiSample sample = reservoir.sample;
+  lastReservoir.merge(reservoir, intersec, material, sample1D(rng));
+
+  sample = lastReservoir.sample;
+
+  if (!scene->testOcclusion(intersec.pos,
+                            intersec.pos + sample.wi * sample.dist)) {
+    direct =
+        lastReservoir.sumWeight / static_cast<float>(lastReservoir.numSamples);
+  }
+
+  if (Math::hasNanOrInf(lastReservoir.sumWeight) || Math::hasNanOrInf(direct)) {
+    direct = glm::vec3(0.f);
+    lastReservoir.clear();
+  }
+
+WriteRadiance:
+  directIllum[idx] =
+      (directIllum[idx] * float(iter) + direct) / float(iter + 1);
+}
 
 /**
  * Wrapper for the __global__ call that sets up the kernel calls and does a
@@ -376,5 +503,29 @@ void pathTrace(glm::vec3 *DirectIllum, glm::vec3 *IndirectIllum, int iter) {
   cudaEventDestroy(stop);
 
   checkCUDAError("pathTrace");
+  looper = (looper + 1) % SobolSampleNum;
+}
+
+void ReSTIRDirect(glm::vec3 *directOutput, int iter, bool useReservoir) {
+  const Camera &cam = hstScene->camera;
+
+  const int blockSizeSingltPTX = 8;
+  const int blockSizeSingltPTY = 8;
+  int blockNumSinglePTX = ceilDiv(cam.resolution.x, blockSizeSingltPTX);
+  int blockNumSinglePTY = ceilDiv(cam.resolution.y, blockSizeSingltPTY);
+
+  dim3 blockNum(blockNumSinglePTX, blockNumSinglePTY);
+  dim3 blockSize(blockSizeSingltPTX, blockSizeSingltPTY);
+
+  if (useReservoir) {
+    ReSTIRDirectKernel<<<blockNum, blockSize>>>(
+        looper, iter, Settings::traceDepth, hstScene->devScene, cam,
+        directOutput, directReservoir);
+  } else {
+    PTDirectKernel<<<blockNum, blockSize>>>(looper, iter, Settings::traceDepth,
+                                            hstScene->devScene, cam,
+                                            directOutput);
+  }
+  checkCUDAError("ReSTIRDirect");
   looper = (looper + 1) % SobolSampleNum;
 }

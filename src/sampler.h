@@ -194,6 +194,7 @@ template <typename T> struct DevDiscreteSampler1D {
     cudaMemcpyHostToDev(devBinomDistribs, hstSampler.binomDistribs.data(),
                         size);
     length = hstSampler.binomDistribs.size();
+    sum = hstSampler.sum;
   }
 
   void destroy() {
@@ -209,6 +210,7 @@ template <typename T> struct DevDiscreteSampler1D {
 
   DistribT *devBinomDistribs = nullptr;
   int length = 0;
+  float sum = 0.f;
 };
 
 template <typename T> struct DevDiscreteSampler2D {

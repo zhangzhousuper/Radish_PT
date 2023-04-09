@@ -20,39 +20,38 @@
 #define DENOISE_LIGHT_ID -2
 
 struct ToneMapping {
-    enum { None   = 0,
-           Filmic = 1,
-           ACES   = 2 };
+  enum { None = 0, Filmic = 1, ACES = 2 };
 };
 
 struct Tracer {
-    enum { Streamed       = 0,
-           SingleKernel   = 1,
-           BVHVisualize   = 2,
-           GBufferPreview = 3 };
+  enum {
+    Streamed = 0,
+    SingleKernel = 1,
+    BVHVisualize = 2,
+    GBufferPreview = 3,
+    ReSTIRDI = 4,
+  };
 };
 
 struct Denoiser {
-    enum {
-        None,
-        Gaussian,
-        EAWavelet,
-        SVGF
-    };
+  enum { None, Gaussian, EAWavelet, SVGF };
 };
 struct Settings {
-    static int  traceDepth;
-    static int  toneMapping;
-    static int  tracer;
-    static int  ImagePreviewOpt;
-    static int  denoiser;
-    static bool modulate;
+  static int traceDepth;
+  static int toneMapping;
+  static int tracer;
+  static int ImagePreviewOpt;
+  static int denoiser;
+  static bool modulate;
 
-    static bool  animateCamera;
-    static float animateRadius;
-    static float animateSpeed;
+  static bool animateCamera;
+  static float animateRadius;
+  static float animateSpeed;
+
+  static float meshLightSampleWeight;
+  static bool useReservoir;
 };
 
 struct State {
-    static bool camChanged;
+  static bool camChanged;
 };

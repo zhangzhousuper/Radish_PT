@@ -173,94 +173,13 @@ void runCuda() {
   }
   gBuffer.render(scene->devScene, scene->camera);
 
-  pathTrace(DirectIllum, IndirectIllum, iteration);
-
-  if (Settings::denoiser == Denoiser::None) {
-    cudaMemcpyDevToDev(tmpDirect, DirectIllum,
-                       width * height * sizeof(glm::vec3));
-    cudaMemcpyDevToDev(tmpIndirect, IndirectIllum,
-                       width * height * sizeof(glm::vec3));
-  } else if (Settings::denoiser == Denoiser::Gaussian) {
-  } else if (Settings::denoiser == Denoiser::EAWavelet) {
-    EAWFilter.filter(tmpDirect, DirectIllum, gBuffer, scene->camera);
-    EAWFilter.filter(tmpIndirect, IndirectIllum, gBuffer, scene->camera);
-  } else {
-    directFilter.filter(tmpDirect, DirectIllum, gBuffer, scene->camera);
-    indirectFilter.filter(tmpIndirect, IndirectIllum, gBuffer, scene->camera);
-  }
-  if (Settings::modulate) {
-    modulateAlbedo(tmpDirect, gBuffer);
-    modulateAlbedo(tmpIndirect, gBuffer);
-
-    if (Settings::ImagePreviewOpt == 4) {
-      modulateAlbedo(DirectIllum, gBuffer);
-    } else if (Settings::ImagePreviewOpt == 5) {
-      modulateAlbedo(IndirectIllum, gBuffer);
-    }
-    // modulateAlbedo(devTemp, gBuffer);
-  }
-  addImage(devTemp, tmpDirect, tmpIndirect, width, height);
+  ReSTIRDirect(DirectIllum, iteration, Settings::useReservoir);
+  devImage = DirectIllum;
 
   uchar4 *devPBO = nullptr;
   cudaGLMapBufferObject((void **)&devPBO, pbo);
 
-  if (Settings::ImagePreviewOpt == 2) {
-#if DENOISER_ENCODE_POSITION
-    copyImageToPBO(devPBO, gBuffer.getDepth(), width, height);
-#else
-    copyImageToPBO(devPBO, gBuffer.getPos(), width, height,
-                   Settings::toneMapping);
-#endif
-  }
-#if DENOISER_ENCODE_NORMAL
-  else if (Settings::ImagePreviewOpt == 1) {
-    copyImageToPBO(devPBO, gBuffer.getNormal(), width, height);
-  }
-#endif
-  else if (Settings::ImagePreviewOpt == 3) {
-    copyImageToPBO(devPBO, gBuffer.motion, width, height);
-  } else if (Settings::ImagePreviewOpt == 11) {
-    copyImageToPBO(devPBO, directFilter.variance, width, height);
-  } else if (Settings::ImagePreviewOpt == 12) {
-    copyImageToPBO(devPBO, indirectFilter.variance, width, height);
-  } else {
-    switch (Settings::ImagePreviewOpt) {
-    case 0:
-      devImage = gBuffer.albedo;
-      break;
-#if !DENOISER_ENCODE_NORMAL
-    case 1:
-      devImage = gBuffer.getNormal();
-      break;
-#endif
-    case 4:
-      devImage = DirectIllum;
-      break;
-    case 5:
-      devImage = IndirectIllum;
-      break;
-    case 6:
-      devImage = tmpDirect;
-      break;
-    case 7:
-      devImage = tmpIndirect;
-      break;
-    case 8:
-      devImage = devTemp;
-      break;
-    case 9:
-      devImage = directFilter.accumMoment[directFilter.frameIdx];
-      break;
-    case 10:
-      devImage = indirectFilter.accumMoment[directFilter.frameIdx];
-      break;
-    }
-
-    copyImageToPBO(devPBO, devImage, width, height, Settings::toneMapping);
-  }
-
-  directFilter.nextFrame();
-  indirectFilter.nextFrame();
+  copyImageToPBO(devPBO, devImage, width, height, Settings::toneMapping);
 
   // unmap buffer object
   cudaGLUnmapBufferObject(pbo);

@@ -33,7 +33,7 @@ target("cuda_pt")
     add_files("src/*.cpp")
     add_files("src/*.cu")
     
-    -- add_includedirs("external/include")
+    add_includedirs("external/include")
     
 
     add_packages("glew","glm", "stb", "imgui","tinygltf")

@@ -126,32 +126,36 @@ __device__ static glm::vec3 ggxSample(glm::vec3 n, glm::vec3 wo, float alpha,
 struct Material {
   enum Type { Lambertian, MetallicWorkflow, Dielectric, Disney, Light };
 
-  __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ glm::vec3 lambertianBSDF(glm::vec3 n, glm::vec3 wo,
+                                      glm::vec3 wi) const {
     return baseColor * INV_PI; // 1/pi for energy conservation
   }
 
-  __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ float lambertianPdf(glm::vec3 n, glm::vec3 wo,
+                                 glm::vec3 wi) const {
     return Math::satDot(n, wi) * INV_PI;
   }
 
   __device__ void lambertianSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
-                                   BSDFSample &sample) {
+                                   BSDFSample &sample) const {
     sample.dir = Math::cosineSampleHemisphere(n, r.x, r.y);
     sample.bsdf = baseColor * INV_PI;
     sample.pdf = Math::satDot(n, sample.dir) * INV_PI;
     sample.type = Diffuse | Reflection;
   }
 
-  __device__ glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ glm::vec3 dielectricBSDF(glm::vec3 n, glm::vec3 wo,
+                                      glm::vec3 wi) const {
     return glm::vec3(0.f);
   }
 
-  __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ float dielectricPdf(glm::vec3 n, glm::vec3 wo,
+                                 glm::vec3 wi) const {
     return 0.f;
   }
 
   __device__ void dielectricSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
-                                   BSDFSample &sample) {
+                                   BSDFSample &sample) const {
     float pdfRefl = fresnel(glm::dot(n, wo), ior);
 
     sample.bsdf = baseColor;
@@ -166,18 +170,20 @@ struct Material {
         sample.type = Invalid;
         return;
       }
+      float eta = ior;
       if (glm::dot(n, wo) < 0) {
-        ior = 1.f / ior;
+        eta = 1.f / eta;
       }
       sample.type = Specular | Transmission;
       sample.pdf = 1.f;
-      sample.bsdf /= ior * ior;
+      sample.bsdf /= eta * eta;
     }
   }
 
   // https://zhuanlan.zhihu.com/p/568549413
   // https://zhuanlan.zhihu.com/p/158025828
-  __device__ glm::vec3 metallicBSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ glm::vec3 metallicBSDF(glm::vec3 n, glm::vec3 wo,
+                                    glm::vec3 wi) const {
     float alpha = roughness * roughness;
     glm::vec3 h = glm::normalize(wo + wi);
 
@@ -196,7 +202,7 @@ struct Material {
                     glm::vec3(g * d / (4.f * cosI * cosO)), f);
   }
 
-  __device__ float metallicPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ float metallicPdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
     glm::vec3 h = glm::normalize(wo + wi);
     return glm::mix(Math::satDot(n, wi) * INV_PI,
                     ggxPdf(n, h, wo, roughness * roughness) /
@@ -205,7 +211,7 @@ struct Material {
   }
 
   __device__ void metallicSample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
-                                 BSDFSample &sample) {
+                                 BSDFSample &sample) const {
     float alpha = roughness * roughness;
 
     if (r.z > (1.f / (2.f - metallic))) {
@@ -224,7 +230,7 @@ struct Material {
     }
   }
 
-  __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ glm::vec3 BSDF(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
     switch (type) {
     case Material::Type::Lambertian:
       return lambertianBSDF(n, wo, wi);
@@ -237,7 +243,7 @@ struct Material {
     return glm::vec3(0.f);
   }
 
-  __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) {
+  __device__ float pdf(glm::vec3 n, glm::vec3 wo, glm::vec3 wi) const {
     switch (type) {
     case Material::Type::Lambertian:
       return lambertianPdf(n, wo, wi);
@@ -250,7 +256,7 @@ struct Material {
   }
 
   __device__ void sample(glm::vec3 n, glm::vec3 wo, glm::vec3 r,
-                         BSDFSample &sample) {
+                         BSDFSample &sample) const {
     switch (type) {
     case Material::Type::Lambertian:
       lambertianSample(n, wo, r, sample);
