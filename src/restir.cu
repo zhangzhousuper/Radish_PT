@@ -36,41 +36,47 @@ __device__ T findTemporalNeighbor(T *reservoir, int idx,
       diff = true;
     }
   }
-  return diff ? T() : reservoir[lastIdx].invalid() ? T() : reservoir[lastIdx];
+  return diff ? T() : reservoir[lastIdx];
 }
 
 template <typename T>
 __device__ T findSpatialNeighborDisk(T *reservoir, int x, int y,
                                      const GBuffer &gBuffer, glm::vec2 rand) {
-  const float radius = 30.f;
+  const float radius = 5.f;
 
   int idx = y * gBuffer.width + x;
 
   glm::vec2 p = Math::concentricSampleDisk(rand.x, rand.y) * radius;
-  int px = x + p.x;
-  int py = y + p.y;
+  int px = x + .5f + p.x;
+  int py = y + .5f + p.y;
   int pIdx = py * gBuffer.width + px;
 
   bool diff = false;
 
-  if (px < 0 || px >= gBuffer.width || py < 0 || py >= gBuffer.height) {
+  if (px < 0 || px >= gBuffer.width || py < 0 || py >= gBuffer.height ||
+      (px == x && py == y)) {
     diff = true;
   } else if (gBuffer.getPrimId()[pIdx] != gBuffer.getPrimId()[idx]) {
     diff = true;
   } else {
     glm::vec3 norm = DECODE_NORM(gBuffer.getNormal()[idx]);
     glm::vec3 pNorm = DECODE_NORM(gBuffer.getNormal()[pIdx]);
-    if (Math::absDot(norm, pNorm) < .1f) {
+    if (glm::dot(norm, pNorm) < .1f) {
       diff = true;
     }
-
+#if DENOISER_ENCODE_POSITION
+    float depth = gBuffer.getDepth()[idx];
+    float pDepth = gBuffer.getDepth()[pIdx];
+    if (glm::abs(depth - pDepth) > depth * .1f) {
+#else
     glm::vec3 pos = gBuffer.getPos()[idx];
     glm::vec3 pPos = gBuffer.getPos()[pIdx];
-    if (glm::distance(pos, pPos) > .5f) {
+    if (glm::distance(pos, pPos) > .1f) {
+#endif
       diff = true;
     }
   }
-  return diff ? T() : reservoir[pIdx].invalid() ? T() : reservoir[pIdx];
+  return diff ? T() : reservoir[pIdx];
 }
 
 __device__ DirectReservoir
@@ -79,20 +85,20 @@ mergeSpatialNeighborDirect(DirectReservoir *reservoir, int x, int y,
   DirectReservoir resvr;
 #pragma unroll
   for (int i = 0; i < 5; i++) {
-    reservoir->merge(
-        findSpatialNeighborDisk(reservoir, x, y, gBuffer, sample2D(rng)),
-        sample1D(rng));
+    DirectReservoir spatialResvr =
+        findSpatialNeighborDisk(reservoir, x, y, gBuffer, sample2D(rng));
+    if (!spatialResvr.invalid()) {
+      resvr.merge(spatialResvr, sample1D(rng));
+    }
   }
-  resvr.checkValidity();
   return resvr;
 }
 
-__global__ void ReSTIRDirectKernel(int looper, int iter, DevScene *scene,
-                                   Camera cam, glm::vec3 *directIllum,
-                                   DirectReservoir *reservoirOut,
-                                   DirectReservoir *reservoirIn,
-                                   DirectReservoir *reservoirTemp,
-                                   GBuffer gBuffer, bool firstFrame) {
+__global__ void
+ReSTIRDirectKernel(int looper, int iter, DevScene *scene, Camera cam,
+                   glm::vec3 *directIllum, DirectReservoir *reservoirOut,
+                   DirectReservoir *reservoirIn, DirectReservoir *reservoirTemp,
+                   GBuffer gBuffer, bool firstFrame, int reuseState) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
   if (x >= cam.resolution.x || y >= cam.resolution.y) {
@@ -116,6 +122,7 @@ __global__ void ReSTIRDirectKernel(int looper, int iter, DevScene *scene,
   }
 
   Material material = scene->getTexturedMaterialAndSurface(intersec);
+  material.baseColor = glm::vec3(1.f);
 
   if (material.type == Material::Type::Light) {
     direct = material.baseColor;
@@ -155,25 +162,42 @@ __global__ void ReSTIRDirectKernel(int looper, int iter, DevScene *scene,
     reservoir.weight = 0.f;
   }
 
-  if (!firstFrame) {
-    reservoir.preClampedMerge<20>(
-        findTemporalNeighbor(reservoirIn, idx, gBuffer), sample1D(rng));
+  if (!firstFrame && (reuseState & ReservoirReuse::Temporal)) {
+    DirectReservoir temporal = findTemporalNeighbor(reservoirIn, idx, gBuffer);
+    if (!temporal.invalid()) {
+      reservoir.preClampedMerge<20>(temporal, sample1D(rng));
+    }
   }
 
   sample = reservoir.sample;
-  if (reservoir.invalid()) {
-    reservoir.clear();
-  } else {
+  DirectReservoir tempReservoir = reservoir;
+
+  if (reuseState & ReservoirReuse::Spatial) {
+    reservoir.checkValidity();
+    reservoirTemp[idx] = reservoir;
+    __syncthreads();
+
+    DirectReservoir spatial =
+        mergeSpatialNeighborDirect(reservoirIn, x, y, gBuffer, rng);
+    if (!spatial.invalid() && !reservoir.invalid()) {
+      reservoir.merge(spatial, sample1D(rng));
+    }
+  }
+  tempReservoir.checkValidity();
+  reservoirOut[idx] = tempReservoir;
+
+  sample = reservoir.sample;
+  if (!reservoir.invalid()) {
     direct = sample.Li * material.BSDF(intersec.norm, intersec.wo, sample.wi) *
              Math::satDot(intersec.norm, sample.wi) *
              reservoir.W(intersec, material);
   }
+
   if (Math::hasNanOrInf(direct)) {
     direct = glm::vec3(0.f);
   }
-  reservoirOut[idx] = reservoir;
-
 WriteRadiance:
+  direct *= gBuffer.albedo[idx];
   directIllum[idx] =
       (directIllum[idx] * float(iter) + direct) / float(iter + 1);
 }
@@ -221,7 +245,7 @@ void ReSTIRDirect(glm::vec3 *directIllum, int iter, const GBuffer &gBuffer) {
   ReSTIRDirectKernel<<<blockNum, blockSize>>>(
       State::looper, iter, State::scene->devScene, cam, directIllum,
       directReservoir, lastDirectReservoir, directTemp, gBuffer,
-      ReSTIR_FirstFrame);
+      ReSTIR_FirstFrame, Settings::reservoirReuse);
 
   std::swap(directReservoir, lastDirectReservoir);
 

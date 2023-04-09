@@ -1,6 +1,7 @@
 #pragma once
 
 #include <device_launch_parameters.h>
+#include <sys/stat.h>
 
 #include "gBuffer.h"
 #include "scene.h"
@@ -56,7 +57,15 @@ template <typename SampleT> struct Reservoir {
     }
   }
 
-  __device__ void clampedMerge(const Reservoir &rhs, int threshold, float r) {}
+  __device__ void clampedMerge(const Reservoir &rhs, int threshold,
+                               float rand) {
+    int clamp = threshold - numSamples;
+    if (rhs.numSamples > clamp) {
+      rhs.weight = static_cast<float>(clamp) / rhs.numSamples;
+      rhs.numSamples = clamp;
+    }
+    merge(rhs, rand);
+  }
 
   template <int M> __device__ void preClampedMerge(Reservoir rhs, float r) {
     static_assert(M > 0, "M <= 0");

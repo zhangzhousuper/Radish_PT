@@ -171,6 +171,9 @@ void runCuda() {
   }
 
   State::camChanged = true;
+  if (!Settings::accumulate) {
+    State::camChanged = true;
+  }
   if (State::camChanged) {
     iteration = 0;
     scene->camera.update();
