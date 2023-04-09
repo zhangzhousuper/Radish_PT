@@ -16,6 +16,7 @@
 #include "scene.h"
 
 #include "denoiser.h"
+#include "restir.h"
 using namespace std;
 
 //-------------------------------
@@ -23,12 +24,12 @@ using namespace std;
 //-------------------------------
 
 extern Scene *scene;
-extern int    iteration;
+extern int iteration;
 
 extern int width;
 extern int height;
 
-extern LeveledEAWFilter     EAWFilter;
+extern LeveledEAWFilter EAWFilter;
 extern SpatioTemporalFilter directFilter;
 extern SpatioTemporalFilter indirectFilter;
 

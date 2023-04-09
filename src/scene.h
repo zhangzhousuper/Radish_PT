@@ -28,6 +28,8 @@
 
 using namespace std;
 
+enum class PdfMeasure { Area, SolidAngle };
+
 struct MeshData {
   void clear() {
     vertices.clear();
@@ -462,7 +464,7 @@ struct DevScene {
     int lightId = lightSampler.sample(r.x, r.y);
 
     if (lightId == lightSampler.length - 1 && envMapSampler.length != 0) {
-      dist = 1e24f;
+      dist = 1e10f;
       return sampleEnvMapNoVisbility(pos, glm::vec2(r.z, r.w), radiance, wi);
     }
     int primId = lightPrimIds[lightId];

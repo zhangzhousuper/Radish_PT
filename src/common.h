@@ -19,6 +19,7 @@
 #define DENOISE_COMPRESS 16.f
 #define DENOISE_LIGHT_ID -2
 
+struct Scene;
 struct ToneMapping {
   enum { None = 0, Filmic = 1, ACES = 2 };
 };
@@ -54,4 +55,6 @@ struct Settings {
 
 struct State {
   static bool camChanged;
+  static int looper;
+  static Scene *scene;
 };

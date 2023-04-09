@@ -31,8 +31,8 @@ int iteration;
 int width;
 int height;
 
-glm::vec3 *DirectIllum = nullptr;
-glm::vec3 *IndirectIllum = nullptr;
+glm::vec3 *directIllum = nullptr;
+glm::vec3 *indirectIllum = nullptr;
 GBuffer gBuffer;
 
 glm::vec3 *devTemp = nullptr;
@@ -45,8 +45,8 @@ SpatioTemporalFilter directFilter;
 SpatioTemporalFilter indirectFilter;
 
 void initImageBuffer() {
-  DirectIllum = cudaMalloc<glm::vec3>(width * height);
-  IndirectIllum = cudaMalloc<glm::vec3>(width * height);
+  directIllum = cudaMalloc<glm::vec3>(width * height);
+  indirectIllum = cudaMalloc<glm::vec3>(width * height);
   gBuffer.create(width, height);
   devTemp = cudaMalloc<glm::vec3>(width * height);
 
@@ -55,8 +55,8 @@ void initImageBuffer() {
 }
 
 void freeImageBuffer() {
-  cudaSafeFree(DirectIllum);
-  cudaSafeFree(IndirectIllum);
+  cudaSafeFree(directIllum);
+  cudaSafeFree(indirectIllum);
   gBuffer.destroy();
 
   cudaSafeFree(devTemp);
@@ -91,15 +91,17 @@ int main(int argc, char **argv) {
 
   // Initialize ImGui Data
   InitImguiData(guiData);
-  InitDataContainer(guiData);
 
   EAWFilter.create(width, height, 5);
   directFilter.create(width, height, 5);
   indirectFilter.create(width, height, 5);
 
   scene->buildDevData();
+  State::scene = scene;
   initImageBuffer();
-  pathTraceInit(scene);
+
+  pathTraceInit();
+  ReSTIRInit();
 
   // GLFW main loop
   mainLoop();
@@ -107,7 +109,10 @@ int main(int argc, char **argv) {
   scene->clear();
   Resource::clear();
   freeImageBuffer();
+
   pathTraceFree();
+  ReSTIRFree();
+
   directFilter.destroy();
   indirectFilter.destroy();
 
@@ -165,6 +170,7 @@ void runCuda() {
         glm::vec3(glm::cos(t), 0.f, glm::sin(t)) * Settings::animateRadius;
   }
 
+  State::camChanged = true;
   if (State::camChanged) {
     iteration = 0;
     scene->camera.update();
@@ -173,8 +179,12 @@ void runCuda() {
   }
   gBuffer.render(scene->devScene, scene->camera);
 
-  ReSTIRDirect(DirectIllum, iteration, Settings::useReservoir);
-  devImage = DirectIllum;
+  if (Settings::useReservoir) {
+    ReSTIRDirect(directIllum, iteration, gBuffer);
+  } else {
+    pathTraceDirect(directIllum, iteration);
+  }
+  devImage = directIllum;
 
   uchar4 *devPBO = nullptr;
   cudaGLMapBufferObject((void **)&devPBO, pbo);
@@ -183,8 +193,7 @@ void runCuda() {
 
   // unmap buffer object
   cudaGLUnmapBufferObject(pbo);
-  if (iteration < 1)
-    iteration++;
+  iteration++;
   gBuffer.update(scene->camera);
   scene->camera.position = camOrigPos;
 }
