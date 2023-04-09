@@ -11,7 +11,7 @@
 #define DENOISER_SPLIT_DIRECT_INDIRECT true
 #define DENOISER_DEMODULATE true
 #define DENOISER_ENCODE_NORMAL false
-#define DENOISER_ENCODE_POSITION false
+#define DENOISER_ENCODE_POSITION true
 
 #define DEMODULATE_EPS 1e-3f
 
@@ -37,6 +37,16 @@ struct Tracer {
 struct Denoiser {
   enum { None, Gaussian, EAWavelet, SVGF };
 };
+
+struct ReservoirReuse {
+  enum {
+    None = 0b00,
+    Temporal = 0b01,
+    Spatial = 0b10,
+    TemporalSpatial = 0b11,
+  };
+};
+
 struct Settings {
   static int traceDepth;
   static int toneMapping;
@@ -51,6 +61,8 @@ struct Settings {
 
   static float meshLightSampleWeight;
   static bool useReservoir;
+  static int reservoirReuse;
+  static bool accumulate;
 };
 
 struct State {
