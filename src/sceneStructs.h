@@ -29,13 +29,16 @@ struct Camera {
     glm::vec3 dir = glm::normalize(pos - position);
     float d = 1.f / glm::dot(dir, view);
 
+    // now camera space
     glm::vec3 p = rotationMatInv * (dir * d);
     float aspect = float(resolution.x) / resolution.y;
     float tanFovY = glm::tan(glm::radians(fov.y));
 
+    // project to NDC
     p /= glm::vec3(glm::vec2(aspect, 1.f) * tanFovY, 1.f);
     glm::vec2 ndc(p);
     ndc = -ndc;
+    // [-1,1] -> [0,1]
     return ndc * .5f + .5f;
   }
 

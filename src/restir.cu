@@ -202,35 +202,6 @@ WriteRadiance:
       (directIllum[idx] * float(iter) + direct) / float(iter + 1);
 }
 
-__global__ void spatialReuseDirect(int looper, int iter,
-                                   DirectReservoir *reservoirOut,
-                                   DirectReservoir *reservoirIn,
-                                   DevScene *scene, GBuffer gBuffer) {
-  int x = blockDim.x * blockIdx.x + threadIdx.x;
-  int y = blockDim.y * blockIdx.y + threadIdx.y;
-  if (x >= gBuffer.width || y >= gBuffer.height) {
-    return;
-  }
-  int index = y * gBuffer.width + x;
-  Sampler rng = makeSeededRandomEngine(looper, index, 5 * RESERVOIR_SIZE + 1,
-                                       scene->sampleSequence);
-  DirectReservoir reservoir = reservoirIn[index];
-
-  if (reservoir.numSamples == 0) {
-    reservoirOut[index].clear();
-    return;
-  }
-
-#pragma unroll
-  for (int i = 0; i < 5; i++) {
-    DirectReservoir neighbor =
-        findSpatialNeighborDisk(reservoirIn, x, y, gBuffer, sample2D(rng));
-    if (!neighbor.invalid()) {
-      reservoir.merge(neighbor, sample1D(rng));
-    }
-  }
-  reservoirOut[index] = reservoir;
-}
 void ReSTIRDirect(glm::vec3 *directIllum, int iter, const GBuffer &gBuffer) {
   const Camera &cam = State::scene->camera;
 
@@ -253,7 +224,7 @@ void ReSTIRDirect(glm::vec3 *directIllum, int iter, const GBuffer &gBuffer) {
     ReSTIR_FirstFrame = false;
   }
 
-  checkCUDAError("ReSTIRDirect");
+  checkCUDAError("ReSTIR Direct");
 #if SAMPLER_USE_SOBOL
   State::looper = (State::looper + 1) % SobolSampleNum;
 #else

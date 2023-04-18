@@ -12,6 +12,7 @@ __global__ void renderGBuffer(DevScene *scene, Camera cam, GBuffer gBuffer) {
   float tanFovY = glm::tan(glm::radians(cam.fov.y));
   glm::vec2 pixelsize = 1.f / glm::vec2(cam.resolution);
   glm::vec2 scr = glm::vec2(x, y) * pixelsize;
+  // ray space to focal plane
   glm::vec2 ruv = scr + pixelsize * glm::vec2(0.5f);
   ruv = 1.f - ruv * 2.f;
 
