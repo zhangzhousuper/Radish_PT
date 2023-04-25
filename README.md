@@ -2,6 +2,18 @@
 Radish is a PathTracer implemented by CUDA and OpenGL
 
 ## Gallery
+![](./img/RIS.jpg)
+<p align="center">left:only light IS, right: RIS</p>
+
+![](./img/temporal.jpg)
+<p align="center">only temporal reuse</p>
+
+![](./img/spatial.jpg)
+<p align="center">only spatial reuse</p>
+
+![](./img/restir_demo.gif)
+<p align="center">spatialtemporal reuse</p>
+
 ![](./img/demo3.png)
 <p align="center">camera and tea sets</p>
 

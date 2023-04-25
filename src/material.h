@@ -45,6 +45,7 @@ __device__ static float fresnel(float cosIn, float ior) {
 #if MATERIAL_DIELECTRIC_USE_SCHLICK_APPROX
   return fresnelSchlick(cosIn, ior);
 #else
+  // accurate fresnel
   if (cosIn < 0.f) {
     ior = 1.f / ior;
     cosIn = -cosIn;
@@ -69,9 +70,12 @@ __device__ static float schlickG(float cosTheta, float alpha) {
   return cosTheta / (cosTheta * (1.f - a) + a);
 }
 
+// geometric shadowing function
 __device__ inline float smithG(float cosWo, float cosWi, float alpha) {
   return schlickG(glm::abs(cosWo), alpha) * schlickG(glm::abs(cosWi), alpha);
 }
+// Trowbridge-Reitz GGX
+// normal distribution function
 __device__ static float ggxDistribution(float cosTheta, float alpha) {
   if (cosTheta < 1e-6f) {
     return 0.f;
@@ -85,8 +89,6 @@ __device__ static float ggxDistribution(float cosTheta, float alpha) {
 
 // m is the microfacet normal
 // n is the surface normal
-// https://cseweb.ucsd.edu/~tzli/cse272/wi2022/lectures/04_uber_bsdf.pdf
-// https : // zhuanlan.zhihu.com/p/57771965
 __device__ static float ggxPdf(glm::vec3 n, glm::vec3 m, glm::vec3 wo,
                                float alpha) {
   return ggxDistribution(glm::dot(n, m), alpha) *
